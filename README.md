@@ -131,6 +131,8 @@ Atelier 的 `HERMES_HOME` 只是 Hermes 状态隔离边界，不是操作系统�
 
 ## 开发与验证
 
+Coding Agent 在修改仓库前应先阅读根目录的 [`AGENTS.md`](AGENTS.md)。其中记录了不可破坏的架构不变量、目录职责、安全边界、Bugfix 流程与分层验证要求。
+
 ```bash
 uv sync --extra dev
 
