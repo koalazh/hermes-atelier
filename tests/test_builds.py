@@ -17,6 +17,7 @@ class FakeProfiles:
     def __init__(self) -> None:
         self.installed: list[str] = []
         self.started: list[str] = []
+        self.stopped: list[str] = []
 
     def model_environment(self, profile: str) -> dict[str, str]:
         return {}
@@ -27,6 +28,17 @@ class FakeProfiles:
     def start(self, profile: str):
         self.started.append(profile)
         return {"profile": profile, "status": "healthy"}
+
+    def stop(self, profile: str):
+        self.stopped.append(profile)
+        return {"profile": profile, "status": "stopped"}
+
+
+class SecondStartFails(FakeProfiles):
+    def start(self, profile: str):
+        if self.started:
+            raise AtelierError("profile_unhealthy", "second Profile failed")
+        return super().start(profile)
 
 
 def make_draft(root: Path, build_id: str) -> Path:
@@ -100,6 +112,40 @@ def test_explicit_approval_promotes_and_installs(
     assert (tmp_path / "apps" / "sample-app" / "app.yaml").is_file()
     assert profiles.installed == ["sample-app"]
     assert profiles.started == ["sample-app--entry"]
+
+
+def test_partial_start_failure_stops_started_gateways(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ATELIER_PROJECT_ROOT", str(tmp_path))
+    store = AtelierStore(tmp_path / ".atelier" / "atelier.db")
+    build = store.create_build(original_request="build it", user_label=None, draft_path="pending")
+    draft = make_draft(tmp_path, build["id"])
+    app = draft / "sample-app"
+    second = app / "profiles" / "second"
+    second.mkdir(parents=True)
+    (second / "distribution.yaml").write_text(
+        "name: sample-app--second\nversion: 1.0.0\n", encoding="utf-8"
+    )
+    definition = yaml.safe_load((app / "app.yaml").read_text(encoding="utf-8"))
+    definition["profiles"].append(
+        {"name": "sample-app--second", "source": "profiles/second"}
+    )
+    (app / "app.yaml").write_text(yaml.safe_dump(definition, sort_keys=False), encoding="utf-8")
+    with store.transaction() as connection:
+        connection.execute(
+            "UPDATE builds SET draft_path=?, status='awaiting_approval' WHERE id=?",
+            (str(draft), build["id"]),
+        )
+    profiles = SecondStartFails()
+    service = BuildService(store, profiles=profiles, apps=AppService(store))  # type: ignore[arg-type]
+
+    with pytest.raises(AtelierError, match="second Profile failed"):
+        service.approve(build["id"])
+
+    assert profiles.stopped == ["sample-app--entry"]
+    assert store.get_app("sample-app") is None
+    assert not (tmp_path / "apps" / "sample-app").exists()
 
 
 def test_draft_rejects_symlinks_and_secret_files(tmp_path: Path) -> None:

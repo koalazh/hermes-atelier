@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import shlex
 import shutil
 import signal
 import socket
@@ -333,7 +334,9 @@ class ProfileService:
         endpoint = self.store.get_endpoint(profile)
         if endpoint is None:
             raise AtelierError("profile_install_failed", f"profile is not configured: {profile}")
-        if endpoint["status"] in {"starting", "healthy"} and self._pid_alive(endpoint.get("pid")):
+        if endpoint["status"] in {"starting", "healthy"} and self._pid_owned(
+            profile, endpoint.get("pid")
+        ):
             return endpoint
         logs = atelier_root() / "logs"
         logs.mkdir(parents=True, exist_ok=True)
@@ -355,8 +358,17 @@ class ProfileService:
         try:
             self.wait_healthy(profile, timeout=30)
         except Exception as exc:
+            cleanup_error = ""
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except (OSError, subprocess.SubprocessError) as cleanup_exc:
+                cleanup_error = f"; failed to stop spawned Gateway: {cleanup_exc}"
             self.store.update_endpoint_status(
-                profile, "unhealthy", pid=process.pid, last_error=str(exc)[:2000]
+                profile,
+                "unhealthy",
+                pid=process.pid if process.poll() is None else None,
+                last_error=f"{exc}{cleanup_error}"[:2000],
             )
             raise
         self.store.update_endpoint_status(profile, "healthy", pid=process.pid)
@@ -386,15 +398,20 @@ class ProfileService:
         if endpoint is None:
             raise AtelierError("endpoint_unavailable", f"unknown Profile endpoint: {profile}")
         pid = endpoint.get("pid")
-        if not self._pid_alive(pid):
-            self.store.update_endpoint_status(profile, "stopped", pid=None)
+        if not self._pid_owned(profile, pid):
+            error = (
+                "stale PID was not owned by this Profile Gateway"
+                if self._pid_alive(pid)
+                else None
+            )
+            self.store.update_endpoint_status(profile, "stopped", pid=None, last_error=error)
             return self.store.get_endpoint(profile)  # type: ignore[return-value]
         self.store.update_endpoint_status(profile, "stopping", pid=pid)
         os.kill(int(pid), signal.SIGTERM)
         deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline and self._pid_alive(pid):
+        while time.monotonic() < deadline and self._pid_owned(profile, pid):
             time.sleep(0.1)
-        if self._pid_alive(pid):
+        if self._pid_owned(profile, pid):
             self.store.update_endpoint_status(
                 profile, "unhealthy", pid=pid, last_error="gateway did not stop after SIGTERM"
             )
@@ -411,10 +428,15 @@ class ProfileService:
         if endpoint is None:
             raise AtelierError("endpoint_unavailable", f"unknown Profile endpoint: {profile}")
         value = dict(endpoint)
-        if value["status"] in {"starting", "healthy", "stopping"} and not self._pid_alive(
-            value.get("pid")
+        if value["status"] in {"starting", "healthy", "stopping"} and not self._pid_owned(
+            profile, value.get("pid")
         ):
-            self.store.update_endpoint_status(profile, "stopped", pid=None)
+            error = (
+                "stale PID was not owned by this Profile Gateway"
+                if self._pid_alive(value.get("pid"))
+                else None
+            )
+            self.store.update_endpoint_status(profile, "stopped", pid=None, last_error=error)
             value = self.store.get_endpoint(profile)  # type: ignore[assignment]
         value["endpoint"] = f"http://{LOOPBACK}:{value['port']}"
         return value
@@ -428,3 +450,22 @@ class ProfileService:
             return True
         except (OSError, ValueError):
             return False
+
+    @classmethod
+    def _pid_owned(cls, profile: str, pid: int | None) -> bool:
+        if not cls._pid_alive(pid):
+            return False
+        try:
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            tokens = shlex.split(result.stdout.strip()) if result.returncode == 0 else []
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return False
+        expected = ["-p", profile, "gateway", "run"]
+        return any(
+            tokens[index : index + len(expected)] == expected for index in range(len(tokens))
+        )

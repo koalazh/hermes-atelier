@@ -308,6 +308,10 @@ class AtelierStore:
             ).fetchone()
         return self._row(row)
 
+    def delete_endpoint(self, profile: str) -> None:
+        with self.transaction() as connection:
+            connection.execute("DELETE FROM profile_endpoints WHERE profile = ?", (profile,))
+
     def list_endpoints(self, app_id: str | None = None) -> list[dict[str, Any]]:
         self.initialize()
         sql = "SELECT * FROM profile_endpoints"

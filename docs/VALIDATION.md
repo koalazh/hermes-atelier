@@ -6,6 +6,7 @@ Validated on 2026-07-24 against Hermes Agent 0.19.0 (`2026.7.20`, commit `9eb7b1
 
 - 9 native Profile Distributions parsed and installed below this repository's `.hermes-runtime/profiles/`.
 - 9 independent loopback Gateways became healthy on ports 18100–18108; every runtime `.env` was mode 0600.
+- The full 63-test suite passed, including failed Proposal rollback, partial Build-start cleanup, failed Gateway-start cleanup, and stale-PID ownership guards. A real Profile stop/start remained healthy with the ownership check enabled.
 - Native update preserved Session, Memory, and `.env` marker files.
 - Actual Hermes registry dispatch passed `task_id`, `session_id`, and Profile context to the async plugin handler; the handler contract returns a JSON string.
 - Real `/v1/runs` and SSE produced `message.delta`, `reasoning.available`, and `run.completed`. The user-supplied Platform host produced a real upstream 429; the official DeepSeek API host completed with `OK`.

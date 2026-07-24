@@ -168,6 +168,16 @@ class ProposalService:
         patch = patch_file.read_text(encoding="utf-8")
         paths = validate_patch(patch, proposal["app_id"])
         self._dry_run(patch_file)
+        original_definition = self.apps.get_definition(proposal["app_id"])
+        original_affected = self._affected_profiles(original_definition, paths)
+        original_running = {
+            profile.name: bool(
+                (endpoint := self.store.get_endpoint(profile.name))
+                and endpoint["status"] in {"healthy", "starting"}
+            )
+            for profile in original_affected
+        }
+        endpoints_before = {item["profile"] for item in self.store.list_endpoints()}
         self.store.update_proposal(proposal_id, status="approved", approved_at=now_iso())
         result = subprocess.run(
             ["git", "apply", "--whitespace=nowarn", str(patch_file)],
@@ -206,12 +216,48 @@ class ProposalService:
             )
             return {"proposal": self.detail(proposal_id), "app": app}
         except Exception as exc:
+            rollback_errors: list[str] = []
+            reverse = subprocess.run(
+                ["git", "apply", "-R", "--whitespace=nowarn", str(patch_file)],
+                cwd=project_root(),
+                capture_output=True,
+                text=True,
+            )
+            if reverse.returncode != 0:
+                rollback_errors.append(reverse.stderr or reverse.stdout or "reverse patch failed")
+            else:
+                try:
+                    self.apps.register(apps_root() / proposal["app_id"])
+                    model_env = self.profiles.model_environment("atelier-builder")
+                    for profile in original_affected:
+                        self.profiles.install_distribution(
+                            apps_root() / proposal["app_id"] / profile.source, profile.name
+                        )
+                        self.profiles.configure_runtime(
+                            profile.name, app_id=proposal["app_id"], model_env=model_env
+                        )
+                        if original_running[profile.name]:
+                            self.profiles.restart(profile.name)
+                    for endpoint in self.store.list_endpoints():
+                        if (
+                            endpoint["app_id"] == proposal["app_id"]
+                            and endpoint["profile"] not in endpoints_before
+                        ):
+                            self.profiles.stop(endpoint["profile"])
+                            self.store.delete_endpoint(endpoint["profile"])
+                except Exception as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
+            message = str(exc)
+            if rollback_errors:
+                message = f"{message}; rollback incomplete: {'; '.join(rollback_errors)}"
+            else:
+                message = f"{message}; source and affected Profiles rolled back"
             self.store.update_proposal(
                 proposal_id,
                 status="patch_apply_failed",
-                apply_result=redact_text(str(exc))[:2000],
+                apply_result=redact_text(message)[:2000],
             )
-            raise AtelierError("patch_apply_failed", str(exc)) from exc
+            raise AtelierError("patch_apply_failed", message) from exc
 
     def reject(self, proposal_id: str) -> dict[str, Any]:
         proposal = self.required(proposal_id)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -101,3 +102,89 @@ def test_project_terminal_path_is_materialized_for_current_hermes(
     _materialize_terminal_cwd(config)
 
     assert f"cwd: {tmp_path.resolve()}/apps/sample" in config.read_text(encoding="utf-8")
+
+
+def test_pid_ownership_requires_matching_profile_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ProfileService, "_pid_alive", staticmethod(lambda pid: True))
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 0, "python hermes -p another--profile gateway run\n", ""
+        ),
+    )
+
+    assert not ProfileService._pid_owned("sample-app--entry", 1234)
+
+
+def test_stop_does_not_signal_unowned_reused_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = AtelierStore(tmp_path / "atelier.db")
+    store.set_endpoint(
+        profile="sample-app--entry",
+        app_id=None,
+        host="127.0.0.1",
+        port=18100,
+        status="healthy",
+        pid=1234,
+    )
+    service = ProfileService(store)
+    monkeypatch.setattr(service, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(service, "_pid_owned", lambda profile, pid: False)
+
+    def unexpected_kill(pid: int, sig: int) -> None:
+        raise AssertionError("an unowned PID must never be signalled")
+
+    monkeypatch.setattr("plugin.atelier.services.profiles.os.kill", unexpected_kill)
+
+    result = service.stop("sample-app--entry")
+
+    assert result["status"] == "stopped"
+    assert result["pid"] is None
+    assert "stale PID" in result["last_error"]
+
+
+def test_failed_start_terminates_the_spawned_gateway(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ATELIER_PROJECT_ROOT", str(tmp_path))
+    store = AtelierStore(tmp_path / "atelier.db")
+    store.set_endpoint(
+        profile="sample-app--entry",
+        app_id=None,
+        host="127.0.0.1",
+        port=18100,
+    )
+    service = ProfileService(store)
+
+    class FakeProcess:
+        pid = 4321
+        terminated = False
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def wait(self, *, timeout: float) -> int:
+            return 0
+
+        def poll(self) -> int | None:
+            return 0 if self.terminated else None
+
+    process = FakeProcess()
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: process)
+
+    def fail_health(profile: str, *, timeout: float) -> None:
+        raise AtelierError("profile_unhealthy", "health failed")
+
+    monkeypatch.setattr(service, "wait_healthy", fail_health)
+
+    with pytest.raises(AtelierError, match="health failed"):
+        service.start("sample-app--entry")
+
+    assert process.terminated
+    endpoint = store.get_endpoint("sample-app--entry")
+    assert endpoint["status"] == "unhealthy"  # type: ignore[index]
+    assert endpoint["pid"] is None  # type: ignore[index]

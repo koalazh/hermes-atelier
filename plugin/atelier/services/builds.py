@@ -181,6 +181,7 @@ class BuildService:
                 "builder_failed", f"formal application already exists: {definition.id}"
             )
         self.store.update_build(build_id, status="approving")
+        started_profiles: list[str] = []
         try:
             shutil.copytree(app_dir, destination)
             app = self.apps.register(destination)
@@ -188,20 +189,31 @@ class BuildService:
             self.profiles.install_app(destination, definition, model_env=model_env)
             for profile in definition.profiles:
                 self.profiles.start(profile.name)
+                started_profiles.append(profile.name)
             self.store.update_build(build_id, status="approved", app_id=definition.id)
             return {"build": self.detail(build_id), "app": app}
         except Exception as exc:
-            if destination.exists():
-                failed = project_root() / ".atelier" / "failed-builds" / build_id
-                failed.parent.mkdir(parents=True, exist_ok=True)
-                destination.rename(failed)
-            self.store.delete_app(definition.id)
+            cleanup_errors = []
+            for profile in reversed(started_profiles):
+                try:
+                    self.profiles.stop(profile)
+                except Exception as cleanup_exc:
+                    cleanup_errors.append(f"failed to stop {profile}: {cleanup_exc}")
+            if not cleanup_errors:
+                if destination.exists():
+                    failed = project_root() / ".atelier" / "failed-builds" / build_id
+                    failed.parent.mkdir(parents=True, exist_ok=True)
+                    destination.rename(failed)
+                self.store.delete_app(definition.id)
+            message = str(exc)
+            if cleanup_errors:
+                message = f"{message}; cleanup incomplete: {'; '.join(cleanup_errors)}"
             self.store.update_build(
                 build_id,
                 status="profile_install_failed",
-                last_error=redact_text(str(exc))[:2000],
+                last_error=redact_text(message)[:2000],
             )
-            raise AtelierError("profile_install_failed", str(exc)) from exc
+            raise AtelierError("profile_install_failed", message) from exc
 
     def detail(self, build_id: str) -> dict[str, Any]:
         build = self.required(build_id)
