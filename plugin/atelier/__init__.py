@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .cli import run_cli_namespace, setup_cli_parser
 from .services.runs import RunService
 from .store import AtelierStore
 
@@ -68,4 +69,11 @@ def register(ctx: Any) -> None:
         is_async=True,
         description="Observable allowlisted cross-Profile Hermes Agent call",
         emoji="⚗️",
+    )
+    ctx.register_cli_command(
+        name="atelier",
+        help="Project-local Hermes multi-Agent development workbench",
+        description="Build, run, observe, review, approve, and replay Profile applications",
+        setup_fn=setup_cli_parser,
+        handler_fn=run_cli_namespace,
     )

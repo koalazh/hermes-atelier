@@ -1,0 +1,15 @@
+{
+  "name": "atelier",
+  "label": "Atelier",
+  "description": "Build, run, observe, review, approve, and replay Hermes Profile applications.",
+  "icon": "FlaskConical",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/atelier",
+    "position": "after:chat"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}
+

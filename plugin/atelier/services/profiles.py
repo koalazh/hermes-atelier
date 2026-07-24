@@ -186,13 +186,29 @@ class ProfileService:
         if model_env:
             updates.update({key: value for key, value in model_env.items() if value})
         _write_env(runtime / ".env", updates)
+        status = existing_endpoint["status"] if existing_endpoint else "stopped"
+        pid = existing_endpoint.get("pid") if existing_endpoint else None
         return self.store.set_endpoint(
             profile=profile,
             app_id=app_id,
             host=LOOPBACK,
             port=port,
-            status="stopped",
+            status=status,
+            pid=pid,
         )
+
+    def model_environment(self, profile: str) -> dict[str, str]:
+        values = _env_values(profile_runtime_dir(profile) / ".env")
+        allowed = {
+            "OPENAI_API_KEY",
+            "OPENAI_BASE_URL",
+            "OPENAI_MODEL",
+            "LLM_API_KEY",
+            "LLM_BASE_URL",
+            "LLM_MODEL",
+            "LLM_PROVIDER",
+        }
+        return {key: value for key, value in values.items() if key in allowed and value}
 
     def install_app(
         self,

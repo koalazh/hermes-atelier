@@ -126,6 +126,7 @@ CREATE TABLE IF NOT EXISTS builds (
     draft_path TEXT NOT NULL,
     builder_session_id TEXT NOT NULL,
     builder_hermes_run_id TEXT,
+    builder_output TEXT,
     app_id TEXT,
     last_error TEXT,
     created_at TEXT NOT NULL,
@@ -254,6 +255,10 @@ class AtelierStore:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM atelier_apps ORDER BY id").fetchall()
         return [self._row(row) for row in rows]
+
+    def delete_app(self, app_id: str) -> None:
+        with self.transaction() as connection:
+            connection.execute("DELETE FROM atelier_apps WHERE id = ?", (app_id,))
 
     def set_endpoint(
         self,
@@ -563,6 +568,7 @@ class AtelierStore:
         allowed = {
             "status",
             "builder_hermes_run_id",
+            "builder_output",
             "app_id",
             "last_error",
             "updated_at",
@@ -574,6 +580,12 @@ class AtelierStore:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM builds WHERE id = ?", (build_id,)).fetchone()
         return self._row(row)
+
+    def list_builds(self) -> list[dict[str, Any]]:
+        self.initialize()
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM builds ORDER BY created_at DESC").fetchall()
+        return [self._row(row) for row in rows]
 
     def create_review(self, *, app_id: str, run_ids: list[str]) -> dict[str, Any]:
         review_id = uuid.uuid4().hex
@@ -612,16 +624,22 @@ class AtelierStore:
         return value
 
     def create_proposal(
-        self, *, app_id: str, review_id: str | None, patch_path: str
+        self,
+        *,
+        app_id: str,
+        review_id: str | None,
+        patch_path: str,
+        proposal_id: str | None = None,
+        status: str = "pending",
     ) -> dict[str, Any]:
-        proposal_id = uuid.uuid4().hex
+        proposal_id = proposal_id or uuid.uuid4().hex
         with self.transaction() as connection:
             connection.execute(
                 """
                 INSERT INTO proposals(id, app_id, review_id, status, patch_path, created_at)
-                VALUES (?, ?, ?, 'pending', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (proposal_id, app_id, review_id, patch_path, now_iso()),
+                (proposal_id, app_id, review_id, status, patch_path, now_iso()),
             )
         return self.get_proposal(proposal_id)  # type: ignore[return-value]
 
@@ -636,6 +654,18 @@ class AtelierStore:
                 "SELECT * FROM proposals WHERE id = ?", (proposal_id,)
             ).fetchone()
         return self._row(row)
+
+    def list_proposals(self, app_id: str | None = None) -> list[dict[str, Any]]:
+        self.initialize()
+        sql = "SELECT * FROM proposals"
+        params: tuple[Any, ...] = ()
+        if app_id:
+            sql += " WHERE app_id = ?"
+            params = (app_id,)
+        sql += " ORDER BY created_at DESC"
+        with self._connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [self._row(row) for row in rows]
 
     def _update(
         self,

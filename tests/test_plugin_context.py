@@ -13,9 +13,13 @@ class FakeContext:
 
     def __init__(self) -> None:
         self.registration: dict[str, Any] = {}
+        self.cli_registration: dict[str, Any] = {}
 
     def register_tool(self, **kwargs: Any) -> None:
         self.registration = kwargs
+
+    def register_cli_command(self, **kwargs: Any) -> None:
+        self.cli_registration = kwargs
 
 
 @pytest.mark.asyncio
@@ -53,3 +57,4 @@ async def test_plugin_handler_receives_hermes_dispatch_context(
     ]
     assert context.registration["name"] == "atelier_call"
     assert context.registration["is_async"] is True
+    assert context.cli_registration["name"] == "atelier"
