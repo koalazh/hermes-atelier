@@ -1,0 +1,5 @@
+name: project-defense-source-reader
+version: 1.0.0
+description: "Read-only access to the Project Defense sample source workspace"
+author: "Hermes Atelier"
+provides_tools: [defense_source_read]

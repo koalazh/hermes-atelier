@@ -1,0 +1,4 @@
+name: Defend the state ownership boundary
+input: "为什么 review job 的状态转换应该由队列存储层负责？请帮我准备一个有取舍的回答。"
+expected: Use source and/or architecture expertise as needed, with facts separated from tradeoffs.
+memory_scope: demo-candidate-durable-queue

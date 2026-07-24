@@ -1,0 +1,24 @@
+schema_version: 1
+id: project-defense
+display_name: Project Defense
+description: Evidence-grounded project defense practice over a read-only sample source workspace.
+entry_profile: project-defense--host
+profiles:
+  - name: project-defense--host
+    source: profiles/host
+    description: Leads the defense and decides which evidence or coaching is needed.
+  - name: project-defense--source
+    source: profiles/source
+    description: Reads only the declared source workspace through a constrained tool.
+  - name: project-defense--architecture
+    source: profiles/architecture
+    description: Explains architectural tradeoffs without inventing source evidence.
+  - name: project-defense--coach
+    source: profiles/coach
+    description: Coaches delivery using an independent stable memory scope.
+allowed_calls:
+  project-defense--host:
+    - project-defense--source
+    - project-defense--architecture
+    - project-defense--coach
+scenarios_dir: scenarios

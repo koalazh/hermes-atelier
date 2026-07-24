@@ -1,0 +1,4 @@
+name: Coach delivery without source lookup
+input: "只评价这句话的表达，不核查代码：我独立打造了一个完美、零故障的分布式任务平台。"
+expected: Call coaching only or respond directly, narrowing ownership and absolute claims.
+memory_scope: demo-candidate-durable-queue
