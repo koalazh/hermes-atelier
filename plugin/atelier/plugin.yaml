@@ -1,0 +1,7 @@
+name: atelier
+version: 1.0.0
+description: "Project-local Hermes multi-Agent development workbench"
+author: "Hermes Atelier"
+provides_tools:
+  - atelier_call
+
