@@ -1,5 +1,7 @@
-# ADR 005: Human-approved improvement
+# ADR 005：改进必须经人工批准
 
-Status: Accepted
+状态：已接受
 
-Reviewer is read-only and evidence-bounded. Builder emits a candidate Patch. The backend validates and dry-runs it, but only explicit approval applies it. The unchanged scenario is replayed, and the user may keep or revert. No component can declare self-improvement from one unverified output.
+Reviewer 只读且受证据约束；Builder 只生成候选 Patch。后端负责路径校验和 dry-run，但只有明确的人工批准才能应用 Patch。
+
+应用后必须重放未被篡改的原场景，由用户比较并决定保留或回退。任何组件都不能根据一次未经验证的输出宣称已经完成自我改进。

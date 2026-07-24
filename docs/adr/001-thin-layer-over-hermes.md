@@ -1,5 +1,7 @@
-# ADR 001: Thin layer over Hermes
+# ADR 001：Hermes 之上的薄层
 
-Status: Accepted
+状态：已接受
 
-Hermes owns Profile isolation and distribution, Agent execution, tools, Memory, Sessions, Skills, plugins, Gateways, Runs, and Dashboard management. Atelier adds only application membership, an observable call seam, correlation, local approval state, and a workbench UI. Native replacement triggers deletion of the duplicate Atelier seam.
+Hermes 负责 Profile 隔离与 Distribution、Agent 执行、工具、Memory、Sessions、Skills、Plugins、Gateways、Runs 和 Dashboard 管理。Atelier 只增加应用成员关系、可观测调用边界、跨 Profile 关联、本地批准状态与工作台 UI。
+
+当 Hermes 原生提供可靠等价能力时，应删除对应 Atelier 接缝，而不是为兼容继续维护重复抽象。

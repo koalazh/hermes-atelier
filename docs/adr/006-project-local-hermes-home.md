@@ -1,5 +1,7 @@
-# ADR 006: Project-local Hermes home
+# ADR 006：项目本地 HERMES_HOME
 
-Status: Accepted
+状态：已接受
 
-All subprocesses receive the absolute `<repo>/.hermes-runtime` as `HERMES_HOME` plus explicit `-p <profile>`. Distribution source remains in Git; runtime Memory, Sessions, credentials, logs, and state do not. Removing the repository removes the complete development environment, but this boundary is not an OS sandbox.
+所有 Atelier 子进程使用绝对 `<repo>/.hermes-runtime` 作为 `HERMES_HOME`，并显式指定 `-p <profile>`。Distribution 源码留在 Git；运行态 Memory、Sessions、凭据、日志和状态禁止提交。
+
+删除仓库即可清理完整开发环境，但该边界只是 Hermes 状态隔离，不是操作系统安全沙箱。
