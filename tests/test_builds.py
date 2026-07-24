@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 from plugin.atelier.errors import AtelierError
+from plugin.atelier.schemas import BuildRequest
 from plugin.atelier.services.apps import AppService
 from plugin.atelier.services.builds import BuildService
 from plugin.atelier.store import AtelierStore
@@ -107,3 +108,26 @@ def test_draft_rejects_symlinks_and_secret_files(tmp_path: Path) -> None:
 
     with pytest.raises(AtelierError, match="runtime secret"):
         BuildService._validate_draft(draft)
+
+
+@pytest.mark.asyncio
+async def test_build_redacts_secrets_before_persisting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ATELIER_PROJECT_ROOT", str(tmp_path))
+    store = AtelierStore(tmp_path / ".atelier" / "atelier.db")
+
+    async def no_op_execute(build_id: str) -> dict[str, Any]:
+        return store.get_build(build_id) or {}
+
+    service = BuildService(store, profiles=FakeProfiles())  # type: ignore[arg-type]
+    monkeypatch.setattr(service, "execute", no_op_execute)
+    secret = "sk-" + "example-secret-value-123456"
+
+    result = service.create(BuildRequest(request=f"use {secret}"))
+    await next(iter(service._tasks))
+
+    stored = store.get_build(result["id"])
+    assert stored is not None
+    assert secret not in stored["original_request"]
+    assert "[REDACTED]" in stored["original_request"]

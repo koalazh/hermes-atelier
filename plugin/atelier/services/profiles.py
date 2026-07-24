@@ -64,6 +64,19 @@ def _set_plugin_enabled(config_path: Path) -> None:
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
+def _set_terminal_cwd(config_path: Path, cwd: Path) -> None:
+    config: dict[str, Any] = {}
+    if config_path.is_file():
+        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            config = loaded
+    terminal = config.setdefault("terminal", {})
+    if not isinstance(terminal, dict):
+        raise ValueError(f"terminal configuration must be a mapping: {config_path}")
+    terminal["cwd"] = str(cwd.resolve())
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
 def _install_plugin_link(home: Path) -> None:
     source = project_root() / "plugin" / "atelier"
     destination = home / "plugins" / "atelier"
@@ -207,6 +220,8 @@ class ProfileService:
             "LLM_BASE_URL",
             "LLM_MODEL",
             "LLM_PROVIDER",
+            "ATELIER_MODEL",
+            "ATELIER_MODEL_BASE_URL",
         }
         return {key: value for key, value in values.items() if key in allowed and value}
 
@@ -252,9 +267,9 @@ class ProfileService:
         logs = atelier_root() / "logs"
         logs.mkdir(parents=True, exist_ok=True)
         log_path = logs / f"{profile}.log"
-        environment = self.subprocess_env
         if terminal_cwd is not None:
-            environment["TERMINAL_CWD"] = str(terminal_cwd.resolve())
+            _set_terminal_cwd(profile_runtime_dir(profile) / "config.yaml", terminal_cwd)
+        environment = self.subprocess_env
         with log_path.open("ab") as output:
             process = subprocess.Popen(
                 [self.hermes_bin, "-p", profile, "gateway", "run"],

@@ -100,8 +100,9 @@ class BuildService:
             )
         drafts_root().mkdir(parents=True, exist_ok=True)
         placeholder = drafts_root() / "pending"
+        safe_request = redact_text(request.request)
         build = self.store.create_build(
-            original_request=request.request,
+            original_request=safe_request,
             user_label=request.user_label,
             draft_path=str(placeholder),
         )
@@ -112,7 +113,7 @@ class BuildService:
             )
         draft.mkdir(parents=True)
         (draft / "BUILD.md").write_text(
-            BUILD_TEMPLATE.format(request=redact_text(request.request)), encoding="utf-8"
+            BUILD_TEMPLATE.format(request=safe_request), encoding="utf-8"
         )
         build = self.required(build["id"])
         task = asyncio.create_task(self.execute(build["id"]))

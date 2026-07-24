@@ -1,0 +1,22 @@
+name: atelier-builder
+version: 1.0.0
+description: "Intent-alignment and Profile Distribution builder for Hermes Atelier"
+hermes_requires: ">=0.19.0"
+author: "Hermes Atelier"
+license: "MIT"
+env_requires:
+  - name: OPENAI_API_KEY
+    description: "Credential for the configured OpenAI-compatible model endpoint"
+    required: true
+  - name: ATELIER_MODEL
+    description: "Model exposed by the configured endpoint"
+    required: true
+  - name: ATELIER_MODEL_BASE_URL
+    description: "OpenAI-compatible endpoint including its API prefix"
+    required: true
+distribution_owned:
+  - SOUL.md
+  - config.yaml
+  - skills/
+  - distribution.yaml
+

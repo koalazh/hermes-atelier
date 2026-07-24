@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from plugin.atelier.errors import AtelierError
-from plugin.atelier.services.profiles import ProfileService, _env_values, _write_env
+from plugin.atelier.services.profiles import (
+    ProfileService,
+    _env_values,
+    _set_terminal_cwd,
+    _write_env,
+)
 from plugin.atelier.store import AtelierStore
 
 
@@ -45,3 +50,14 @@ def test_endpoint_credentials_fail_without_runtime_secret(
 
     with pytest.raises(AtelierError, match="missing API key"):
         service.endpoint_credentials("one--entry")
+
+
+def test_terminal_cwd_is_written_as_an_absolute_profile_setting(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text("terminal:\n  backend: local\n", encoding="utf-8")
+    workdir = tmp_path / "draft"
+    workdir.mkdir()
+
+    _set_terminal_cwd(config, workdir)
+
+    assert f"cwd: {workdir.resolve()}" in config.read_text(encoding="utf-8")
