@@ -5,4 +5,4 @@ description: Stress-test one architectural claim using supplied evidence and exp
 
 # Architecture defense
 
-For the specific claim, explain the protected invariant, why the chosen boundary owns it, the strongest alternative, the cost of each choice, and the evidence still needed. Do not infer code facts that were not included in the task. Prefer a narrow correction over a topology rewrite.
+For the specific claim, explain the protected invariant, why the chosen boundary owns it, the strongest alternative, the cost of each choice, and the evidence still needed. Do not infer code facts that were not included in the task, and do not supply numerical performance estimates without measured evidence in the task. Prefer a narrow correction over a topology rewrite.

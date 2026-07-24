@@ -110,6 +110,28 @@ def test_examples_cover_no_call_multi_call_failure_and_evidence_gap() -> None:
     assert {"evidence-gap", "architecture", "coach-only"} <= defense_scenarios
 
 
+def test_project_defense_stable_memory_is_scoped_to_coaching() -> None:
+    scenarios = project_root() / "apps" / "project-defense" / "scenarios"
+    coach = yaml.safe_load((scenarios / "coach-only.yaml").read_text(encoding="utf-8"))
+    evidence = yaml.safe_load((scenarios / "evidence-gap.yaml").read_text(encoding="utf-8"))
+    architecture = yaml.safe_load((scenarios / "architecture.yaml").read_text(encoding="utf-8"))
+
+    assert coach["memory_scope"] == "demo-candidate-durable-queue"
+    assert "memory_scope" not in evidence
+    assert "memory_scope" not in architecture
+
+
+def test_project_defense_architecture_forbids_unmeasured_numbers() -> None:
+    profile = project_root() / "apps" / "project-defense" / "profiles" / "architecture"
+    soul = (profile / "SOUL.md").read_text(encoding="utf-8")
+    skill = (
+        profile / "skills" / "project-defense-architecture" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "Never introduce numerical latency" in soul
+    assert "do not supply numerical performance estimates" in skill
+
+
 def test_app_detail_exposes_saved_scenarios_and_revision_tracks_profile_assets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

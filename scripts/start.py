@@ -42,7 +42,8 @@ def main(argv: list[str] | None = None) -> int:
             "ATELIER_PROJECT_ROOT": str(REPOSITORY_ROOT),
             "HERMES_DASHBOARD_HOST": args.dashboard_host,
         }
-        subprocess.Popen(
+        print(f"dashboard starting at http://{args.dashboard_host}:{args.dashboard_port}")
+        process = subprocess.Popen(
             [
                 os.environ.get("HERMES_BIN", "hermes"),
                 "-p",
@@ -58,10 +59,19 @@ def main(argv: list[str] | None = None) -> int:
             env=environment,
             start_new_session=True,
         )
-        print(f"dashboard starting at http://{args.dashboard_host}:{args.dashboard_port}")
+        try:
+            return process.wait()
+        except KeyboardInterrupt:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+            print("dashboard stopped; Profile Gateways remain running")
+            return 130
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
