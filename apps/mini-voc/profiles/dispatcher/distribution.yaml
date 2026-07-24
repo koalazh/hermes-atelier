@@ -1,0 +1,7 @@
+name: mini-voc--dispatcher
+version: 1.0.0
+description: "Mini VOC entry Agent"
+hermes_requires: ">=0.19.0"
+author: "Hermes Atelier"
+license: "MIT"
+distribution_owned: [SOUL.md, config.yaml, skills/, distribution.yaml]

@@ -1,0 +1,3 @@
+name: Product evidence only
+input: "登录验证码总是很晚才收到，现在有已知问题或改进吗？"
+expected: Call only the product specialist and cite PRD-LOGIN-17 as simulated evidence.

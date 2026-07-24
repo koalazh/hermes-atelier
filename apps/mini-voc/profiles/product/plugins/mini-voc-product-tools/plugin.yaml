@@ -1,0 +1,5 @@
+name: mini-voc-product-tools
+version: 1.0.0
+description: "Deterministic simulated product evidence for Mini VOC"
+author: "Hermes Atelier"
+provides_tools: [voc_product_lookup]

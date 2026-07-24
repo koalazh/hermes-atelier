@@ -1,0 +1,3 @@
+name: Product and transaction evidence
+input: "订单 ORD-1001 已退款，但下载导出仍提示处理中。分别是什么状态？"
+expected: Call both relevant specialists and keep their simulated evidence separate.

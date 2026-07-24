@@ -1,0 +1,3 @@
+name: Clarify vague sentiment
+input: "最近体验很差，帮我看看。"
+expected: Ask what feature or transaction is affected without calling a specialist.

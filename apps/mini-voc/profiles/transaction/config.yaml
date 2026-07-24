@@ -1,0 +1,12 @@
+model:
+  default: ${ATELIER_MODEL}
+  provider: custom
+  base_url: ${ATELIER_MODEL_BASE_URL}
+  api_key: ${OPENAI_API_KEY}
+terminal:
+  backend: local
+  cwd: ${ATELIER_PROJECT_ROOT}/apps/mini-voc/profiles/transaction
+agent:
+  disabled_toolsets: [terminal, file, code_execution]
+plugins:
+  enabled: [atelier, mini-voc-transaction-tools]
