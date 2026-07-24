@@ -64,6 +64,8 @@ Source inspection establishes the intended interface but does not prove the inst
 
 If test 1 fails, `atelier_call` must return a structured `incompatible_hermes` error and documentation must state a higher minimum version. No alternate runtime or natural-language Run ID is allowed.
 
+All seven capability groups were exercised on 2026-07-24. Exact Run, Review, Proposal, browser, and caveat evidence is recorded in `docs/VALIDATION.md`.
+
 ## 4. Duplication analysis
 
 The following would duplicate Hermes and will not be built:
@@ -104,7 +106,7 @@ The implementation may split Python modules further where a tested boundary requ
 - The checked-in `plugin/atelier` is source. Runtime installation uses local symbolic links when supported and a safe copy fallback, so editing one repository remains authoritative without committing runtime copies.
 - Root and child transcript IDs follow `at_<run-id>_root` and `at_<run-id>_<span-id>`. The parser accepts only Atelier-created identifiers recorded in SQLite; it never trusts arbitrary natural-language identity claims.
 - The caller Profile comes from the Hermes plugin context, not a tool argument. `target` is allowlisted against the caller's registered application revision.
-- API keys remain only in ignored Profile `.env` files and server-side endpoint records. Endpoint API responses expose health and host/port metadata but never secret values or `.env` contents.
+- API keys remain only in ignored Profile `.env` files. The SQLite endpoint registry stores host, port, status, and PID but no key. Endpoint API responses never expose secret values or `.env` contents.
 - SQLite write failure marks `trace_degraded`. If the call authorization or parent/child link cannot be established durably before dispatch, the child call fails rather than returning an untraceable success. If event persistence degrades after dispatch, the real downstream result/error is returned with explicit degraded-trace metadata.
 - HTTP retries are limited to idempotent connection establishment/reads. Atelier never selects a fallback expert and never implements business retry policy.
 
