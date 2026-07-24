@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -11,6 +12,8 @@ import yaml
 
 from plugin.atelier.paths import project_root
 from plugin.atelier.schemas import load_app_definition
+from plugin.atelier.services.apps import AppService
+from plugin.atelier.store import AtelierStore
 
 
 class ToolContext:
@@ -105,3 +108,23 @@ def test_examples_cover_no_call_multi_call_failure_and_evidence_gap() -> None:
 
     assert {"clarify", "cross-domain", "expert-failure"} <= voc_scenarios
     assert {"evidence-gap", "architecture", "coach-only"} <= defense_scenarios
+
+
+def test_app_detail_exposes_saved_scenarios_and_revision_tracks_profile_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = project_root() / "apps" / "mini-voc"
+    app_dir = tmp_path / "apps" / "mini-voc"
+    shutil.copytree(source, app_dir)
+    monkeypatch.setenv("ATELIER_PROJECT_ROOT", str(tmp_path))
+    service = AppService(AtelierStore(tmp_path / "atelier.db"))
+    first = service.register(app_dir)
+    scenarios = service.get("mini-voc")["scenarios"]
+    skill = app_dir / "profiles" / "dispatcher" / "skills" / "mini-voc-dispatch" / "SKILL.md"
+    skill.write_text(skill.read_text(encoding="utf-8") + "\nrevision marker\n", encoding="utf-8")
+    second = service.register(app_dir)
+
+    assert {item["id"] for item in scenarios} >= {"clarify", "product"}
+    assert all(item["input"] for item in scenarios)
+    assert len(first["definition_revision"]) == 16
+    assert second["definition_revision"] != first["definition_revision"]

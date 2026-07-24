@@ -5,14 +5,25 @@ import json
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from ..paths import apps_root, ensure_within
 from ..schemas import AppDefinition, load_app_definition
 from ..store import AtelierStore
 
 
-def definition_revision(definition: AppDefinition) -> str:
-    body = json.dumps(definition.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(body.encode()).hexdigest()[:16]
+def definition_revision(definition: AppDefinition, app_dir: Path) -> str:
+    digest = hashlib.sha256(
+        json.dumps(
+            definition.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        ).encode()
+    )
+    for path in sorted(item for item in app_dir.rglob("*") if item.is_file()):
+        if path.name in {".env", "auth.json"} or path.is_symlink():
+            continue
+        digest.update(path.relative_to(app_dir).as_posix().encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
 
 
 class AppService:
@@ -30,7 +41,7 @@ class AppService:
             display_name=definition.display_name,
             entry_profile=definition.entry_profile,
             source_path=str(app_dir),
-            definition_revision=definition_revision(definition),
+            definition_revision=definition_revision(definition, app_dir),
             definition=definition.model_dump(mode="json"),
         )
 
@@ -57,7 +68,33 @@ class AppService:
         value = dict(app)
         value["definition"] = json.loads(value.pop("definition_json"))
         value["endpoints"] = self.store.list_endpoints(app_id)
+        value["scenarios"] = self.scenarios(app_id)
         return value
+
+    def scenarios(self, app_id: str) -> list[dict[str, Any]]:
+        app = self.store.get_app(app_id)
+        if app is None:
+            raise KeyError(f"unknown application: {app_id}")
+        definition = self.get_definition(app_id)
+        directory = ensure_within(
+            Path(app["source_path"]) / definition.scenarios_dir,
+            Path(app["source_path"]),
+        )
+        result = []
+        for path in sorted(directory.glob("*.yaml")):
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if not isinstance(loaded, dict) or not isinstance(loaded.get("input"), str):
+                continue
+            result.append(
+                {
+                    "id": path.stem,
+                    "name": str(loaded.get("name") or path.stem),
+                    "input": loaded["input"],
+                    "expected": str(loaded.get("expected") or ""),
+                    "memory_scope": loaded.get("memory_scope"),
+                }
+            )
+        return result
 
     def list(self) -> list[dict[str, Any]]:
         result = []

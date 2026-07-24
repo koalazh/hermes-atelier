@@ -14,4 +14,4 @@ apps/.drafts/
 # Local test and coverage output
 .coverage
 htmlcov/
-
+/dist/

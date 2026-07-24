@@ -77,6 +77,59 @@ def _set_terminal_cwd(config_path: Path, cwd: Path) -> None:
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
+def _materialize_terminal_cwd(config_path: Path) -> None:
+    if not config_path.is_file():
+        return
+    loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict) or not isinstance(loaded.get("terminal"), dict):
+        return
+    raw = loaded["terminal"].get("cwd")
+    marker = "${ATELIER_PROJECT_ROOT}"
+    if not isinstance(raw, str) or not raw.startswith(marker):
+        return
+    suffix = raw[len(marker) :].lstrip("/")
+    resolved = (project_root() / suffix).resolve()
+    try:
+        resolved.relative_to(project_root().resolve())
+    except ValueError as exc:
+        raise AtelierError("profile_install_failed", "terminal.cwd escapes the project") from exc
+    loaded["terminal"]["cwd"] = str(resolved)
+    config_path.write_text(yaml.safe_dump(loaded, sort_keys=False), encoding="utf-8")
+
+
+def _set_model_config(config_path: Path, model_env: dict[str, str]) -> None:
+    model = model_env.get("ATELIER_MODEL", "").strip()
+    base_url = model_env.get("ATELIER_MODEL_BASE_URL", "").strip().rstrip("/")
+    if not model or not base_url or not model_env.get("OPENAI_API_KEY", "").strip():
+        raise AtelierError(
+            "profile_install_failed",
+            "model, base URL, and runtime API key are required for a Profile",
+        )
+    config: dict[str, Any] = {}
+    if config_path.is_file():
+        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            config = loaded
+    config["model"] = {"default": model, "provider": "custom:atelier"}
+    providers = config.get("custom_providers", [])
+    if not isinstance(providers, list):
+        providers = []
+    providers = [
+        item
+        for item in providers
+        if not isinstance(item, dict) or item.get("name") != "atelier"
+    ]
+    providers.append(
+        {
+            "name": "atelier",
+            "base_url": base_url,
+            "key_env": "OPENAI_API_KEY",
+        }
+    )
+    config["custom_providers"] = providers
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+
 def _install_plugin_link(home: Path) -> None:
     source = project_root() / "plugin" / "atelier"
     destination = home / "plugins" / "atelier"
@@ -198,6 +251,8 @@ class ProfileService:
         }
         if model_env:
             updates.update({key: value for key, value in model_env.items() if value})
+            _set_model_config(runtime / "config.yaml", model_env)
+        _materialize_terminal_cwd(runtime / "config.yaml")
         _write_env(runtime / ".env", updates)
         status = existing_endpoint["status"] if existing_endpoint else "stopped"
         pid = existing_endpoint.get("pid") if existing_endpoint else None
@@ -224,6 +279,22 @@ class ProfileService:
             "ATELIER_MODEL_BASE_URL",
         }
         return {key: value for key, value in values.items() if key in allowed and value}
+
+    def missing_environment(self, profile: str) -> list[str]:
+        runtime = profile_runtime_dir(profile)
+        manifest_path = runtime / "distribution.yaml"
+        if not manifest_path.is_file():
+            return []
+        loaded = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        requirements = loaded.get("env_requires", []) if isinstance(loaded, dict) else []
+        values = _env_values(runtime / ".env")
+        missing = []
+        for item in requirements:
+            if isinstance(item, dict) and item.get("required", True):
+                name = str(item.get("name") or "")
+                if name and not values.get(name):
+                    missing.append(name)
+        return missing
 
     def install_app(
         self,

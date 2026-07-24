@@ -58,14 +58,21 @@ def _api_error(exc: Exception) -> HTTPException:
 @router.get("/apps")
 async def list_apps():
     _assert_loopback()
-    return {"items": apps.list()}
+    items = apps.list()
+    for app in items:
+        for endpoint in app.get("endpoints", []):
+            endpoint["missing_environment"] = profiles.missing_environment(endpoint["profile"])
+    return {"items": items}
 
 
 @router.get("/apps/{app_id}")
 async def get_app(app_id: str):
     _assert_loopback()
     try:
-        return apps.get(app_id)
+        app = apps.get(app_id)
+        for endpoint in app.get("endpoints", []):
+            endpoint["missing_environment"] = profiles.missing_environment(endpoint["profile"])
+        return app
     except Exception as exc:
         raise _api_error(exc) from exc
 

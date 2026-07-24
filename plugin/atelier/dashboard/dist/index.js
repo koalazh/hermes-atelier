@@ -172,7 +172,13 @@
               h("dl", { className: "meta" }, h("dt", null, "Entry"), h("dd", null, app.entry_profile), h("dt", null, "Profiles"), h("dd", null, String((app.endpoints || []).length))),
               h("div", { className: "endpoint-list" }, (app.endpoints || []).map(function (endpoint) {
                 return h("div", { className: "endpoint", key: endpoint.profile },
-                  h("div", null, h("strong", null, endpoint.profile), h("small", null, endpoint.host + ":" + endpoint.port)),
+                  h("div", null,
+                    h("strong", null, endpoint.profile),
+                    h("small", null, endpoint.host + ":" + endpoint.port),
+                    endpoint.missing_environment && endpoint.missing_environment.length
+                      ? h("small", { className: "missing-env" }, "Missing: " + endpoint.missing_environment.join(", "))
+                      : null,
+                  ),
                   h(Badge, { value: endpoint.status }),
                 );
               })),
@@ -241,6 +247,15 @@
     var inputState = useState("");
     var input = inputState[0];
     var setInput = inputState[1];
+    var scenarioState = useState("");
+    var scenarioId = scenarioState[0];
+    var setScenarioId = scenarioState[1];
+    var scenariosState = useState([]);
+    var scenarios = scenariosState[0];
+    var setScenarios = scenariosState[1];
+    var memoryState = useState(null);
+    var memoryScope = memoryState[0];
+    var setMemoryScope = memoryState[1];
     var runState = useState(null);
     var run = runState[0];
     var setRun = runState[1];
@@ -251,13 +266,30 @@
     var error = errorState[0];
     var setError = errorState[1];
     useEffect(function () { if (!appId && props.apps[0]) setAppId(props.apps[0].id); }, [props.apps.length]);
+    useEffect(function () {
+      if (!appId) return;
+      json("/apps/" + appId).then(function (value) {
+        setScenarios(value.scenarios || []);
+        setScenarioId("");
+        setMemoryScope(null);
+      });
+    }, [appId]);
+
+    function chooseScenario(value) {
+      setScenarioId(value);
+      var selected = scenarios.find(function (scenario) { return scenario.id === value; });
+      if (selected) {
+        setInput(selected.input);
+        setMemoryScope(selected.memory_scope || null);
+      }
+    }
 
     function refresh(id) {
       return json("/runs/" + id).then(setRun);
     }
     function start() {
       setError(""); setEvents([]);
-      post("/runs", { app_id: appId, input: input, user_label: "Playground" })
+      post("/runs", { app_id: appId, input: input, scenario_id: scenarioId || null, memory_scope: memoryScope, user_label: "Playground" })
         .then(function (created) {
           setRun(created);
           streamRun(created.id, function (event) {
@@ -275,6 +307,11 @@
         h("div", { className: "eyebrow" }, "REAL HERMES EXECUTION"), h("h2", null, "Playground"),
         h("label", null, "Application"),
         h("select", { className: "atelier-input", value: appId, onChange: function (event) { setAppId(event.target.value); } }, props.apps.map(function (app) { return h("option", { value: app.id, key: app.id }, app.display_name); })),
+        h("label", null, "Saved scenario (optional)"),
+        h("select", { className: "atelier-input", value: scenarioId, onChange: function (event) { chooseScenario(event.target.value); } },
+          h("option", { value: "" }, "Temporary request"),
+          scenarios.map(function (scenario) { return h("option", { value: scenario.id, key: scenario.id }, scenario.name); }),
+        ),
         h("label", null, "Request or acceptance scenario"),
         h("textarea", { className: "atelier-textarea tall", value: input, onChange: function (event) { setInput(event.target.value); }, placeholder: "Give the entry Agent a complete outcome, not a route." }),
         h("div", { className: "actions" }, h(Button, { kind: "primary", disabled: !appId || !input.trim(), onClick: start }, "Run"), run && ["queued", "running", "stopping"].indexOf(run.status) >= 0 ? h(Button, { kind: "danger", onClick: stop }, "Request stop") : null, run ? h(Button, { onClick: replay }, "Replay") : null),

@@ -8,6 +8,8 @@ from plugin.atelier.errors import AtelierError
 from plugin.atelier.services.profiles import (
     ProfileService,
     _env_values,
+    _materialize_terminal_cwd,
+    _set_model_config,
     _set_terminal_cwd,
     _write_env,
 )
@@ -61,3 +63,41 @@ def test_terminal_cwd_is_written_as_an_absolute_profile_setting(tmp_path: Path) 
     _set_terminal_cwd(config, workdir)
 
     assert f"cwd: {workdir.resolve()}" in config.read_text(encoding="utf-8")
+
+
+def test_model_runtime_config_uses_env_reference_without_persisting_secret(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text("plugins:\n  enabled: [atelier]\n", encoding="utf-8")
+    secret = "runtime-secret-value"
+
+    _set_model_config(
+        config,
+        {
+            "ATELIER_MODEL": "example-model",
+            "ATELIER_MODEL_BASE_URL": "https://models.example/v1/",
+            "OPENAI_API_KEY": secret,
+        },
+    )
+
+    text = config.read_text(encoding="utf-8")
+    assert "default: example-model" in text
+    assert "provider: custom:atelier" in text
+    assert "base_url: https://models.example/v1" in text
+    assert "key_env: OPENAI_API_KEY" in text
+    assert secret not in text
+
+
+def test_project_terminal_path_is_materialized_for_current_hermes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ATELIER_PROJECT_ROOT", str(tmp_path))
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "terminal:\n  cwd: ${ATELIER_PROJECT_ROOT}/apps/sample\n", encoding="utf-8"
+    )
+
+    _materialize_terminal_cwd(config)
+
+    assert f"cwd: {tmp_path.resolve()}/apps/sample" in config.read_text(encoding="utf-8")

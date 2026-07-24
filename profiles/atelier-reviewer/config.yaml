@@ -2,7 +2,6 @@ model:
   default: ${ATELIER_MODEL}
   provider: custom
   base_url: ${ATELIER_MODEL_BASE_URL}
-  api_key: ${OPENAI_API_KEY}
 
 terminal:
   backend: local
@@ -12,4 +11,3 @@ terminal:
 plugins:
   enabled:
     - atelier
-
