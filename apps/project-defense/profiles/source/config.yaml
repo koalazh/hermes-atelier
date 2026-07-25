@@ -1,5 +1,5 @@
 agent:
-  disabled_toolsets: [terminal, file, code_execution, project, memory, delegation]
+  disabled_toolsets: [terminal, file, code_execution, project, memory]
 plugins:
   enabled: [project-defense-source-reader]
 memory:

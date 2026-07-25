@@ -65,6 +65,9 @@ class StudioStore:
             "drafter_run_ids": [],
             "messages": [],
             "plan_path": str(self._directory("designs") / design_id / "PLAN.md"),
+            "handoff_path": str(
+                self._directory("designs") / design_id / "IMPLEMENTATION_HANDOFF.md"
+            ),
             "draft_path": str(self._directory("designs") / design_id / "draft"),
             "candidate": None,
             "created_at": timestamp,

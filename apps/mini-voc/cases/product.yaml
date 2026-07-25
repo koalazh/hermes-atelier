@@ -1,6 +1,6 @@
 id: product
 input: "登录验证码总是很晚才收到，现在有已知问题或改进吗？"
-memory_policy: clean
+memory_policy: new_session
 assertions:
   calls:
     required: [product]

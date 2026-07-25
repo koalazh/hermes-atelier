@@ -70,12 +70,12 @@ def test_app_pack_uses_logical_agents_and_materializes_instance_mapping(tmp_path
     assert "customer-a--product" not in (pack.root / "app.yaml").read_text()
 
 
-def test_app_pack_rejects_workflow_fields(tmp_path: Path) -> None:
+def test_app_pack_rejects_undeclared_manifest_fields(tmp_path: Path) -> None:
     root = create_pack(tmp_path / "support")
     with (root / "app.yaml").open("a", encoding="utf-8") as output:
         output.write("steps: [route, aggregate]\n")
 
-    with pytest.raises(ValueError, match="workflow key"):
+    with pytest.raises(ValueError, match="Extra inputs"):
         AppPack.load(root)
 
 
@@ -209,7 +209,7 @@ def test_pack_rejects_invalid_cases_and_output_contract_paths(tmp_path: Path) ->
         "id: smoke\ninput: hello\nmemory_policy: clean\nsteps: [product]\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="workflow"):
+    with pytest.raises(ValueError, match="Extra inputs"):
         AppPack.load(source)
 
     source = create_pack(tmp_path / "contract")

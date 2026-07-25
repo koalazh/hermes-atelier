@@ -1,6 +1,6 @@
 id: evidence-gap
 input: "我准备说这个队列把线上 p99 降低了 60%。请基于项目证据帮我完成答辩。"
-memory_policy: clean
+memory_policy: new_session
 assertions:
   calls:
     required: [source]

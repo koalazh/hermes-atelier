@@ -1,5 +1,5 @@
 agent:
-  disabled_toolsets: [terminal, file, code_execution, session_search, memory, delegation]
+  disabled_toolsets: [terminal, file, code_execution, session_search, memory]
 plugins:
   enabled: [profile_call]
 memory:

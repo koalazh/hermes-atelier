@@ -1,6 +1,6 @@
 id: expert-failure
 input: "请核查订单 ORD-FAIL 的退款状态，不要猜测。"
-memory_policy: clean
+memory_policy: new_session
 assertions:
   calls:
     required: [transaction]

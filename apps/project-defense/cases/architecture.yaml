@@ -1,5 +1,5 @@
 id: architecture
 input: "为什么 review job 的状态转换应该由队列存储层负责？请帮我准备一个有取舍的回答。"
-memory_policy: session_only
+memory_policy: new_session
 assertions: {}
 human_review: 事实、架构推断、替代方案和未知应明确分层。

@@ -1,6 +1,6 @@
 id: clarify
 input: "最近体验很差，帮我看看。"
-memory_policy: clean
+memory_policy: new_session
 assertions:
   calls:
     forbidden: [product, transaction]

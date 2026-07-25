@@ -67,8 +67,20 @@ class FakeBuilderClient:
         self.outputs = [
             "DESIGN_STATUS: NEEDS_INPUT\n\nWho will use the application?",
             (
-                "Alignment complete.\nDESIGN_STATUS: PLAN_READY\n# Design Plan\n\n"
-                "Users: support operators\n\nRisk: real API is missing."
+                "Alignment complete.\nDESIGN_STATUS: PLAN_READY\n"
+                "=== PLAN.md ===\n# Design Plan\n\nUsers: support operators\n\n"
+                "Risk: real API is missing.\n"
+                "=== IMPLEMENTATION_HANDOFF.md ===\n# Implementation Handoff\n\n"
+                "## Original requirement\nBuild a support application\n\n"
+                "## Aligned goal\nHelp support operators.\n\n"
+                "## Profile boundaries\nStart with one Profile.\n\n"
+                "## Tools, data, and permissions\nThe real API is not connected.\n\n"
+                "## Session, Memory, and Skill ownership\nHermes owns Sessions.\n\n"
+                "## Recommended collaboration primitive\nNone initially.\n\n"
+                "## App Pack and HTTP delivery boundary\nOpenAI-compatible entry.\n\n"
+                "## Acceptance Cases\nValidate honest missing-data behavior.\n\n"
+                "## Real systems not connected\nSupport API.\n\n"
+                "## Explicit non-goals\nNo deployment platform."
             ),
             "Draft generated for inspection.",
         ]
@@ -126,6 +138,9 @@ async def test_design_is_multiturn_and_generate_draft_is_explicit(tmp_path: Path
     ]
     assert not Path(design["draft_path"]).exists()
     assert "support operators" in second["plan"]
+    assert "Implementation Handoff" in second["implementation_handoff"]
+    assert "Real systems not connected" in second["implementation_handoff"]
+    assert Path(second["handoff_path"]).is_file()
 
     generated = await service.generate_draft(design["id"])
 
@@ -197,7 +212,7 @@ human_review: Check simulated-data disclosure.
     )
 
     assert experiment["status"] == "completed"
-    assert experiment["memory_policy"] == "clean"
+    assert experiment["memory_policy"] == "new_session"
     assert experiment["model_fingerprint"] == {
         "provider": "custom",
         "model": "test-model",
@@ -206,7 +221,7 @@ human_review: Check simulated-data disclosure.
     assert len(experiment["trials"]) == 2
     assert all(trial["assertions_passed"] for trial in experiment["trials"])
     assert all(trial["traces"][0]["target"] == "product" for trial in experiment["trials"])
-    assert all("selected clean state" in call["instructions"] for call in client.calls)
+    assert all("selected new_session state" in call["instructions"] for call in client.calls)
     assert all(call["memory_scope"] is None for call in client.calls)
     assert "runtime-secret" not in str(store.get_experiment(experiment["id"]))
 
@@ -258,13 +273,15 @@ async def test_experiment_applies_initial_state_to_trial_instructions(tmp_path: 
     assert '"ticket": "T-100"' in client.calls[0]["instructions"]
 
 
-def test_case_rejects_workflow_and_requires_explicit_retained_scope(tmp_path: Path) -> None:
+def test_case_schema_rejects_unknown_fields_and_migrates_legacy_terms(
+    tmp_path: Path,
+) -> None:
     case_path = tmp_path / "case.yaml"
     case_path.write_text(
         "id: invalid\ninput: work\nmemory_policy: clean\nsteps: [call-product]\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="workflow"):
+    with pytest.raises(ValueError, match="Extra inputs"):
         load_case(case_path)
 
     case_path.write_text(
@@ -273,6 +290,14 @@ def test_case_rejects_workflow_and_requires_explicit_retained_scope(tmp_path: Pa
     )
     with pytest.raises(ValueError, match="memory_scope"):
         load_case(case_path)
+
+    case_path.write_text(
+        "id: migrated\ninput: work\nmemory_policy: clean\ninitial_state:\n  source: old\n",
+        encoding="utf-8",
+    )
+    case, _ = load_case(case_path)
+    assert case.memory_policy == "new_session"
+    assert case.evaluation_context == {"source": "old"}
 
 
 def test_studio_store_rejects_path_traversal_identifiers(tmp_path: Path) -> None:

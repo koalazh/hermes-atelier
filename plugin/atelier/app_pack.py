@@ -14,18 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 LOGICAL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 PACK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$")
-FORBIDDEN_WORKFLOW_KEYS = {
-    "steps",
-    "workflow",
-    "if",
-    "else",
-    "route_when",
-    "parallel",
-    "fan_out",
-    "aggregate",
-    "judge",
-    "retry_policy_for_business",
-}
 RUNTIME_NAMES = {
     ".atelier",
     ".DS_Store",
@@ -170,23 +158,6 @@ class AppManifest(BaseModel):
         return self
 
 
-def _find_forbidden(value: Any, path: tuple[str, ...] = ()) -> str | None:
-    if isinstance(value, dict):
-        for key, item in value.items():
-            key_text = str(key)
-            if key_text in FORBIDDEN_WORKFLOW_KEYS:
-                return ".".join((*path, key_text))
-            found = _find_forbidden(item, (*path, key_text))
-            if found:
-                return found
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            found = _find_forbidden(item, (*path, str(index)))
-            if found:
-                return found
-    return None
-
-
 class AppPack:
     def __init__(self, root: Path, manifest: AppManifest) -> None:
         self.root = root.resolve()
@@ -208,9 +179,6 @@ class AppPack:
         raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ValueError("app.yaml must contain a mapping")
-        forbidden = _find_forbidden(raw)
-        if forbidden:
-            raise ValueError(f"workflow key is forbidden in app.yaml: {forbidden}")
         manifest = AppManifest.model_validate(raw)
         for agent_id, agent in manifest.agents.items():
             distribution = (root / agent.distribution).resolve()

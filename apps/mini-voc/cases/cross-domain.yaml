@@ -1,6 +1,6 @@
 id: cross-domain
 input: "订单 ORD-1001 已退款，但下载导出仍提示处理中。分别是什么状态？"
-memory_policy: clean
+memory_policy: new_session
 assertions:
   calls:
     required: [product, transaction]

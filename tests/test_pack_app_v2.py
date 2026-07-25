@@ -56,6 +56,20 @@ class FakeHermes:
             path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
+class FakeHTTPResponse:
+    def __init__(self, value: dict[str, object]) -> None:
+        self.body = json.dumps(value).encode()
+
+    def __enter__(self) -> FakeHTTPResponse:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
+
+
 def released_pack(tmp_path: Path) -> Path:
     source = create_pack(tmp_path / "source")
     destination = tmp_path / "release"
@@ -426,6 +440,109 @@ def test_pack_attestation_binds_release_runtime_definition_and_model(
     soul.write_text("tampered\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="installed Profile asset changed"):
         runtime.attest(instance="customer-a")
+
+
+def test_configured_attestation_and_live_probe_are_distinct_per_profile_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+
+    def urlopen(request: object, *, timeout: float) -> FakeHTTPResponse:
+        assert timeout == 0.1
+        url = str(getattr(request, "full_url"))
+        if url.endswith("/health"):
+            return FakeHTTPResponse(
+                {"status": "ok", "platform": "hermes-agent", "version": "0.19.0"}
+            )
+        if url.endswith("/health/detailed"):
+            return FakeHTTPResponse({"status": "ready", "gateway_state": "running"})
+        if url.endswith("/v1/capabilities"):
+            return FakeHTTPResponse(
+                {
+                    "object": "hermes.api_server.capabilities",
+                    "features": {"run_stop": True, "session_resources": True},
+                }
+            )
+        if url.endswith("/v1/models"):
+            model = "entry-model" if ":9123/" in url else "specialist-model"
+            return FakeHTTPResponse({"object": "list", "data": [{"id": model}]})
+        raise AssertionError(url)
+
+    runtime = PackRuntime(
+        pack,
+        hermes_home=home,
+        hermes_runner=FakeHermes(home),
+        urlopen=urlopen,
+    )
+    runtime.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+    runtime.configure(
+        instance="customer-a",
+        model="default-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+
+    configured = runtime.attest(instance="customer-a")
+    live = runtime.live_probe(instance="customer-a", timeout=0.1)
+
+    assert configured["kind"] == "configured_runtime_attestation"
+    assert configured["profiles"]["dispatcher"]["model_configuration"]["model"] == (
+        "default-model"
+    )
+    assert configured["evidence_levels"] == [
+        "packed",
+        "installed",
+        "configured",
+        "runtime_attested",
+    ]
+    assert live["kind"] == "live_runtime_probe"
+    assert live["verified"] is True
+    assert live["profiles"]["dispatcher"]["models"]["data"][0]["id"] == "entry-model"
+    assert live["profiles"]["product"]["models"]["data"][0]["id"] == "specialist-model"
+    assert (
+        live["profiles"]["product"]["profile_identity"]["verification"] == "unverified"
+    )
+    assert live["evidence_levels"][-1] == "live_probed"
+
+
+def test_cases_on_new_physical_profiles_record_fresh_verified_separately(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=FakeHermes(home))
+    runtime.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+    runtime.configure(
+        instance="customer-a",
+        model="test-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_entry_run",
+        lambda **_: ("run-entry", "completed", "ok"),
+    )
+
+    result = runtime.run_cases(instance="customer-a")
+
+    assert result["passed"] is True
+    assert result["evidence_levels"] == [
+        "packed",
+        "installed",
+        "configured",
+        "cases_passed",
+        "fresh_verified",
+    ]
 
 
 def test_configure_rejects_profile_tampered_after_install(
