@@ -67,13 +67,33 @@ Hermes 0.19.0 Dashboard 在 loopback `19610` 上进行真实浏览器验收。�
 
 最终浏览器检查覆盖 Design、Run & Observe、Evaluate、Release 四页；两个 Pack、7 个 Case、revision、唯一 public entry 均可见。Run & Observe 以真实 Trial Session 加载四条 `profile_call` started/completed 事件和两个目标 Run ID；浏览器 console 无 warning/error。验收后只停止本任务的 Dashboard，保留用户原有 Dashboard。
 
+## Completion Challenge 修复验证
+
+第一轮独立 Completion Challenge 暴露了 release 身份、运行时绑定和独立 Case 执行的缺口。修复后的 release 会拒绝 symlink、Secret 形状和私有环境文件，Definition Snapshot 覆盖最终交付的全部文件、Agent、Case、Contract 与 runner；Git 来源必须解析到干净的明确 commit/tag，非 Git 来源则使用内容摘要。Studio 的 Design、Experiment、Trace Session ID 也统一限制为安全标识符。
+
+release wrapper 现在提供 `attest` 和 `cases`：前者同时核验 `app.lock`、已安装 Profile 资产、逻辑映射、模型与入口；后者直接调用 Hermes `/v1/runs`，每个 Case 使用独立 Session，落实 clean/session-only/retained 策略，收集临时 Pack-local Trace 并执行调用、输出及可选 JSON Contract 断言，不依赖 Dashboard 或 Studio API。`update` 的 smoke 使用同一 Case runner，失败时恢复旧 release。
+
+最终隔离运行使用 DeepSeek `deepseek-v4-flash`，Secret 只从权限为 `0600` 的临时 Profile `.env` 导入进程环境。Mini VOC release `0f2b19e7…` attestation 通过，4 个 Case 全部通过：
+
+- `clarify`：Run `run_7f52b365…`，0 条调用 Trace；
+- `product`：Run `run_65a305db…`，2 条 Trace，命中 `PRD-LOGIN-17`；
+- `cross-domain`：Run `run_46a8187e…`，4 条 Trace，同时调用 Product 与 Transaction；
+- `expert-failure`：Run `run_e4d84f68…`，2 条 Trace，未把专家不可用解释为订单状态。
+
+Hermes 0.19 的主 Agent Run 接口不提供 Pack 可声明的结构化响应参数。真实运行中，模型虽满足业务断言，仍可能为严格 JSON 添加代码围栏或尾注。因此 Mini VOC 按原需求允许的“结构化或半结构化”边界收敛为“已知 / 不确定 / 下一步”语义约束，不虚假声明 JSON Schema；通用 runner 的 JSON Contract 校验仍有确定性回归覆盖。
+
+Project Defense 最终 release `a8ffd59e…` attestation 通过。`evidence-gap` 最新 Run `run_84eb4cc5…` 产生 2 条 Trace，Source 调用、`p99` 和两项禁造断言全部通过；同轮完整 Case 运行中的 `architecture`（Run `run_b4794f58…`）与 `coach-only`（Run `run_7c537418…`）也通过。一次模型输出曾正确拒绝无证据数字但漏写指标名，Case 因此暴露失败；Host 合同补充“挑战定量主张时复述指标名”后复验通过，没有降低断言。
+
+Studio Experiment `32de1de538104fd58c85c3ef2486ad1d` 不再接受调用方自报 endpoint 或 model。它从已安装实例取得已验证 attestation，冻结 Pack revision `a8ffd59e…`、source revision `3c859325…`、Case hash 与模型指纹，并在 Trial 前后复验；入口 Run `run_b23b4540…` 收集 4 条 Trace，四项断言全部通过。候选若缺少 baseline revision/hash 或修改 Case，会在执行前被拒绝。
+
 ## 最终门禁
 
-最终结果：92 个 pytest 全部通过；Ruff、`node --check plugin/atelier/dashboard/dist/index_v2.js`、`uv build` 与 `git diff --check` 通过。Mini VOC（4 Cases）和 Project Defense（3 Cases）均在 fresh 临时目录完成 validate/release，release 中没有 `.env`、Atelier 数据、`__pycache__` 或 Python bytecode，wrapper 可执行。仓库 Secret 形状与私钥文件扫描无命中；本任务使用的 19500–19504、19600、19610 均无监听，对应 launchd 条目已移至废纸篓。用户原有 Dashboard 未停止。
+最终结果：100 个 pytest 全部通过；Ruff、`node --check plugin/atelier/dashboard/dist/index_v2.js`、`uv build`、`git diff 117f4d2..HEAD --check` 与两个 Pack 的 validate/release 通过。release 拒绝 symlink、Secret 形状和不安全状态文件，wrapper 可执行且 Definition Snapshot 覆盖全部 33/37 个交付文件。仓库 Secret 形状与私钥文件扫描无命中；本任务使用的 19700–19710 运行服务和 launchd 条目已清理。用户原有 Dashboard 未停止。
 
 ## 已知限制
 
 - 真实模型输出具有随机性，smoke 只证明协议和资产链路可执行；
+- Hermes 0.19 主 Agent Run 不提供 Pack 级结构化响应参数；需要严格机器结构的应用只能在底层运行时原生保证时声明 JSON Contract；
 - Prompt/Case 不能证明模型永不虚构，肯定性业务主张仍需来源证据或人工审阅；
 - Trace Sink 是可选开发观测，不是生产审计；缺少 Trace 不能独立证明没有调用；
 - update 是多条 Hermes/文件/网络操作的 best-effort 回滚，不是事务部署；
