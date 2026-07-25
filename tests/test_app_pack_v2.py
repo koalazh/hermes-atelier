@@ -178,6 +178,49 @@ def test_release_rejects_symlinks_and_secret_shapes(tmp_path: Path) -> None:
     (source / "README.md").write_text("token=" + "sk-" + "x" * 30, encoding="utf-8")
     with pytest.raises(ValueError, match="secret shape"):
         release_pack(AppPack.load(source), tmp_path / "release")
+    assert not (tmp_path / "release").exists()
+
+
+def test_release_rejects_generic_cloud_credentials_without_leaving_destination(
+    tmp_path: Path,
+) -> None:
+    source = create_pack(tmp_path / "support")
+    (source / "credentials.txt").write_text(
+        "AWS_SECRET_ACCESS_KEY=" + "A1b2C3d4E5f6G7h8I9j0" * 2 + "\n",
+        encoding="utf-8",
+    )
+    destination = tmp_path / "release"
+
+    with pytest.raises(ValueError, match="secret shape"):
+        release_pack(AppPack.load(source), destination)
+
+    assert not destination.exists()
+
+
+def test_pack_rejects_invalid_cases_and_output_contract_paths(tmp_path: Path) -> None:
+    import yaml
+
+    source = create_pack(tmp_path / "workflow")
+    (source / "cases" / "smoke.yaml").write_text(
+        "id: smoke\ninput: hello\nmemory_policy: clean\nsteps: [product]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="workflow"):
+        AppPack.load(source)
+
+    source = create_pack(tmp_path / "contract")
+    manifest_path = source / "app.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["public_api"]["output_contract"] = "../../outside.schema.json"
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="output contract"):
+        AppPack.load(source)
+
+    manifest["public_api"]["output_contract"] = "contracts/output.schema.json"
+    manifest["contracts"] = []
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="declared contract"):
+        AppPack.load(source)
 
 
 def test_release_resolves_clean_git_provenance(tmp_path: Path) -> None:

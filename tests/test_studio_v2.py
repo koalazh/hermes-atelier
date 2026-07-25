@@ -236,6 +236,28 @@ async def test_retained_experiment_propagates_explicit_scope_in_instructions(
     assert "'candidate-one'" in client.calls[0]["instructions"]
 
 
+@pytest.mark.asyncio
+async def test_experiment_applies_initial_state_to_trial_instructions(tmp_path: Path) -> None:
+    pack = create_pack(tmp_path / "support")
+    case_path = pack / "cases" / "smoke.yaml"
+    case_path.write_text(
+        "id: stateful\ninput: inspect ticket\ninitial_state:\n"
+        "  ticket: T-100\nmemory_policy: clean\n",
+        encoding="utf-8",
+    )
+    store = StudioStore(tmp_path / ".atelier" / "v2")
+    client = FakeExperimentClient(store)
+
+    await ExperimentService(store, client_factory=lambda *_: client).run(
+        pack_root=pack,
+        case_path=case_path,
+        api_key="runtime-secret",
+        runtime_attestation=runtime_attestation(pack, case_path),
+    )
+
+    assert '"ticket": "T-100"' in client.calls[0]["instructions"]
+
+
 def test_case_rejects_workflow_and_requires_explicit_retained_scope(tmp_path: Path) -> None:
     case_path = tmp_path / "case.yaml"
     case_path.write_text(
@@ -307,4 +329,104 @@ async def test_experiment_rejects_unattested_runtime_and_candidate_case_changes(
                 "baseline_pack_revision": "baseline",
                 "baseline_case_hash": "different",
             },
+        )
+
+
+@pytest.mark.asyncio
+async def test_experiment_verifies_candidate_git_identity_and_baseline_case(
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    repository = tmp_path / "repository"
+    pack = create_pack(repository / "apps" / "support")
+    case_path = pack / "cases" / "smoke.yaml"
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(["git", "-C", str(repository), "config", "user.name", "Test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "baseline"], check=True)
+    baseline_commit = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    baseline_revision = build_definition_snapshot(AppPack.load(pack))["revision"]
+    baseline_case_hash = hashlib.sha256(case_path.read_bytes()).hexdigest()
+    subprocess.run(["git", "-C", str(repository), "checkout", "-qb", "candidate"], check=True)
+    (pack / "profiles" / "dispatcher" / "SOUL.md").write_text(
+        "# candidate dispatcher\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "candidate"], check=True)
+    candidate_commit = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    attestation = runtime_attestation(pack, case_path)
+    attestation["source_provenance"] = {"kind": "git", "revision": candidate_commit}
+    store = StudioStore(tmp_path / ".atelier" / "v2")
+    client = FakeExperimentClient(store)
+    candidate = {
+        "branch": "candidate",
+        "worktree": str(repository),
+        "commit": candidate_commit,
+        "baseline_commit": baseline_commit,
+        "baseline_source_revision": baseline_revision,
+        "baseline_case_hash": baseline_case_hash,
+    }
+
+    experiment = await ExperimentService(
+        store, client_factory=lambda *_: client
+    ).run(
+        pack_root=pack,
+        case_path=case_path,
+        api_key="runtime-secret",
+        runtime_attestation=attestation,
+        candidate=candidate,
+    )
+
+    assert experiment["candidate"]["commit"] == candidate_commit
+    assert "profiles/dispatcher/SOUL.md" in experiment["candidate"]["diff_summary"]
+
+    invalid = {**candidate, "worktree": str(tmp_path / "missing")}
+    with pytest.raises(ValueError, match="worktree"):
+        await ExperimentService(store).run(
+            pack_root=pack,
+            case_path=case_path,
+            api_key="runtime-secret",
+            runtime_attestation=attestation,
+            candidate=invalid,
+        )
+
+    case_path.write_text(
+        "id: smoke\ninput: changed condition\nmemory_policy: clean\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "change case"], check=True)
+    changed_commit = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    changed_attestation = runtime_attestation(pack, case_path)
+    changed_attestation["source_provenance"] = {
+        "kind": "git",
+        "revision": changed_commit,
+    }
+    with pytest.raises(ValueError, match="changed the Case"):
+        await ExperimentService(store).run(
+            pack_root=pack,
+            case_path=case_path,
+            api_key="runtime-secret",
+            runtime_attestation=changed_attestation,
+            candidate={**candidate, "commit": changed_commit},
         )

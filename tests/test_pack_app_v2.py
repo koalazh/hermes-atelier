@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
 from plugin.atelier.app_pack import AppPack, release_pack
 from plugin.atelier.pack_app import PackRuntime
@@ -23,16 +25,34 @@ class FakeHermes:
         if "install" in args:
             name = args[args.index("--name") + 1]
             source = Path(args[args.index("install") + 1])
-            import shutil
 
             shutil.copytree(source, self.root / "profiles" / name, dirs_exist_ok=True)
+            receipt = self.root / "profiles" / name / "distribution.yaml"
+            value = yaml.safe_load(receipt.read_text(encoding="utf-8"))
+            value["name"] = name
+            value["distribution_owned"] = [
+                str(item).rstrip("/") for item in value.get("distribution_owned") or []
+            ]
+            value["source"] = str(source)
+            value["installed_at"] = f"install-{len(self.calls)}"
+            receipt.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
         if "delete" in args:
             name = args[args.index("delete") + 1]
             profile = self.root / "profiles" / name
             if profile.exists():
-                import shutil
-
                 shutil.rmtree(profile)
+        if "config" in args and "set" in args:
+            profile = self.root / "profiles" / args[1]
+            path = profile / "config.yaml"
+            value = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
+            config = value if isinstance(value, dict) else {}
+            index = args.index("set")
+            keys = args[index + 1].split(".")
+            target = config
+            for key in keys[:-1]:
+                target = target.setdefault(key, {})
+            target[keys[-1]] = args[index + 2]
+            path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
 def released_pack(tmp_path: Path) -> Path:
@@ -85,6 +105,20 @@ def test_pack_install_and_configure_use_hermes_and_local_runtime_state(
     assert not any("custom_providers" in call for call in fake.calls)
     assert not any("multiplex_profiles" in call for call in fake.calls)
     assert (home / "app-packs" / "customer-a" / "app.lock").is_file()
+
+    runtime.configure(
+        instance="customer-a",
+        model="second-model",
+        model_base_url="https://second.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9223,
+    )
+    state = json.loads(
+        (home / "app-packs" / "customer-a" / "runtime.json").read_text(encoding="utf-8")
+    )
+    assert state["model"] == "second-model"
+    assert state["entry_base_url"] == "http://127.0.0.1:9223"
 
     runtime.gateway("start", instance="customer-a")
     started = [call for call in fake.calls if "gateway" in call and "start" in call]
@@ -380,3 +414,112 @@ def test_pack_attestation_binds_release_runtime_definition_and_model(
     soul.write_text("tampered\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="installed Profile asset changed"):
         runtime.attest(instance="customer-a")
+
+
+def test_configure_rejects_profile_tampered_after_install(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=FakeHermes(home))
+    runtime.install(instance="customer-a")
+    (home / "profiles" / "customer-a--dispatcher" / "SOUL.md").write_text(
+        "tampered before configure\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+
+    with pytest.raises(RuntimeError, match="does not match app.lock"):
+        runtime.configure(
+            instance="customer-a",
+            model="test-model",
+            model_base_url="https://model.invalid/v1",
+            model_key_env="MODEL_KEY",
+            gateway_key_env="GATEWAY_KEY",
+            gateway_port=9123,
+        )
+
+
+def test_attestation_cannot_rebaseline_tampered_release_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=FakeHermes(home))
+    runtime.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+    runtime.configure(
+        instance="customer-a",
+        model="test-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+    soul = home / "profiles" / "customer-a--dispatcher" / "SOUL.md"
+    soul.write_text("tampered and rebaselined\n", encoding="utf-8")
+    import hashlib
+
+    state_path = home / "app-packs" / "customer-a" / "runtime.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["runtime_definition"]["dispatcher"]["SOUL.md"] = hashlib.sha256(
+        soul.read_bytes()
+    ).hexdigest()
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="does not match app.lock"):
+        runtime.attest(instance="customer-a")
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda runtime: runtime.configure(
+            instance="../../escape",
+            model="test-model",
+            model_base_url="https://model.invalid/v1",
+            model_key_env="MODEL_KEY",
+            gateway_key_env="GATEWAY_KEY",
+            gateway_port=9123,
+        ),
+        lambda runtime: runtime.run_cases(instance="../../escape"),
+        lambda runtime: runtime.attest(instance="../../escape"),
+        lambda runtime: runtime.update(instance="../../escape", restart=False),
+        lambda runtime: runtime.gateway("start", instance="../../escape"),
+    ],
+)
+def test_all_pack_operations_reject_escaping_instance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: object,
+) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=FakeHermes(home))
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+
+    with pytest.raises(ValueError, match="instance"):
+        operation(runtime)  # type: ignore[operator]
+
+    assert not (tmp_path / "escape").exists()
+
+
+def test_case_instructions_include_declared_initial_state(tmp_path: Path) -> None:
+    runtime = PackRuntime(
+        released_pack(tmp_path),
+        hermes_home=tmp_path / "hermes",
+        hermes_runner=FakeHermes(tmp_path / "hermes"),
+    )
+
+    instructions = runtime._case_instructions(
+        {"manifest": {"public_api": {"output_contract": None}}},
+        {
+            "memory_policy": "clean",
+            "initial_state": {"ticket": "T-100", "attempt": 2},
+        },
+    )
+
+    assert '"ticket": "T-100"' in instructions
+    assert '"attempt": 2' in instructions

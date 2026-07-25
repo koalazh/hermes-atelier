@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -33,12 +34,21 @@ class CandidateRecord(BaseModel):
     diff_summary: str = Field(max_length=100_000)
 
 
+class ExperimentCandidate(BaseModel):
+    branch: str = Field(min_length=1, max_length=500)
+    worktree: str = Field(min_length=1, max_length=2000)
+    commit: str = Field(min_length=40, max_length=64, pattern=r"^[0-9a-f]+$")
+    baseline_commit: str = Field(min_length=40, max_length=64, pattern=r"^[0-9a-f]+$")
+    baseline_source_revision: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+    baseline_case_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]+$")
+
+
 class ExperimentCreate(BaseModel):
     pack_id: str
     case_id: str
     runtime_instance: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     trial_count: int = Field(default=1, ge=1, le=20)
-    candidate: dict[str, str] | None = None
+    candidate: ExperimentCandidate | None = None
 
 
 class Feedback(BaseModel):
@@ -179,6 +189,19 @@ async def session_traces(session_id: str):
 async def run_experiment(request: ExperimentCreate):
     try:
         pack = _pack(request.pack_id)
+        candidate = request.candidate.model_dump() if request.candidate else None
+        if candidate:
+            repository = subprocess.run(
+                ["git", "-C", str(pack.root), "rev-parse", "--show-toplevel"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if repository.returncode != 0:
+                raise ValueError("baseline App Pack must belong to Git")
+            relative = pack.root.relative_to(Path(repository.stdout.strip()).resolve())
+            worktree = Path(candidate["worktree"]).expanduser().resolve()
+            pack = AppPack.load(ensure_within(worktree / relative, worktree))
         matching = [
             relative for relative in pack.manifest.cases if Path(relative).stem == request.case_id
         ]
@@ -196,7 +219,7 @@ async def run_experiment(request: ExperimentCreate):
             api_key=api_key,
             runtime_attestation=attestation,
             trial_count=request.trial_count,
-            candidate=request.candidate,
+            candidate=candidate,
             attestation_refresh=lambda: runtime.attest(instance=request.runtime_instance),
         )
     except Exception as exc:

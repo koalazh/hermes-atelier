@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
@@ -48,6 +49,12 @@ RUNTIME_NAMES = {
 SECRET_PATTERNS = (
     re.compile(rb"sk-[A-Za-z0-9_-]{20,}"),
     re.compile(rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
+    re.compile(
+        rb"(?i)\b(?:AWS_SECRET_ACCESS_KEY|GOOGLE_API_KEY|AZURE_CLIENT_SECRET|"
+        rb"API[_-]?KEY|ACCESS[_-]?TOKEN|AUTH[_-]?TOKEN|PASSWORD)\s*[:=]\s*"
+        rb"[\"']?(?!example\b|placeholder\b|changeme\b|replace-|use-a-|set-in-)"
+        rb"[A-Za-z0-9/+_.-]{20,}"
+    ),
 )
 
 
@@ -73,6 +80,16 @@ class PublicAPI(BaseModel):
     protocol: Literal["openai"] = "openai"
     endpoints: list[Literal["/v1/responses", "/v1/chat/completions"]] = Field(min_length=1)
     output_contract: str | None = None
+
+    @field_validator("output_contract")
+    @classmethod
+    def relative_output_contract(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or path == Path("."):
+            raise ValueError("output contract must be a non-empty relative path")
+        return path.as_posix()
 
 
 class AppManifest(BaseModel):
@@ -115,6 +132,19 @@ class AppManifest(BaseModel):
             raise ValueError("invalid logical Agent ID")
         return value
 
+    @field_validator("cases", "contracts")
+    @classmethod
+    def relative_resources(cls, value: list[str]) -> list[str]:
+        normalized = []
+        for item in value:
+            path = Path(item)
+            if path.is_absolute() or ".." in path.parts or path == Path("."):
+                raise ValueError("App Pack resources must use non-empty relative paths")
+            normalized.append(path.as_posix())
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("App Pack resources must not contain duplicates")
+        return normalized
+
     @model_validator(mode="after")
     def valid_graph(self) -> AppManifest:
         if self.entry not in self.agents:
@@ -134,6 +164,9 @@ class AppManifest(BaseModel):
                     raise ValueError(f"allowed_calls target is not declared: {target}")
                 if target == source:
                     raise ValueError("self calls are not allowed")
+        contract = self.public_api.output_contract
+        if contract and contract not in self.contracts:
+            raise ValueError("output contract must be a declared contract")
         return self
 
 
@@ -195,6 +228,17 @@ class AppPack:
                 raise ValueError(f"App Pack resource escapes root: {relative}") from exc
             if not target.is_file():
                 raise ValueError(f"missing App Pack resource: {relative}")
+        from .evaluation import load_case
+
+        for relative in manifest.cases:
+            load_case(root / relative)
+        for relative in manifest.contracts:
+            try:
+                contract = json.loads((root / relative).read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSON Contract: {relative}") from exc
+            if not isinstance(contract, dict):
+                raise ValueError(f"JSON Contract must contain an object: {relative}")
         return cls(root, manifest)
 
     def runtime_mapping(
@@ -385,68 +429,79 @@ def release_pack(
         git_revision,
         source_revision=source_snapshot["revision"],
     )
-    shutil.copytree(pack.root, destination, ignore=_ignore_runtime)
-    if "profile_call" in pack.manifest.collaboration:
-        plugin_source = Path(__file__).resolve().parents[1] / "profile_call"
-        for source in pack.manifest.allowed_calls:
-            distribution = destination / pack.manifest.agents[source].distribution
-            plugin_target = distribution / "plugins" / "profile_call"
-            plugin_target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(plugin_source, plugin_target, ignore=_ignore_runtime)
-            distribution_manifest_path = distribution / "distribution.yaml"
-            distribution_manifest = (
-                yaml.safe_load(distribution_manifest_path.read_text(encoding="utf-8")) or {}
-            )
-            owned = list(distribution_manifest.get("distribution_owned") or [])
-            if "plugins/profile_call" not in owned:
-                owned.append("plugins/profile_call")
-            distribution_manifest["distribution_owned"] = owned
-            distribution_manifest_path.write_text(
-                yaml.safe_dump(distribution_manifest, sort_keys=False), encoding="utf-8"
-            )
-            config_path = distribution / "config.yaml"
-            config = (
-                yaml.safe_load(config_path.read_text(encoding="utf-8"))
-                if config_path.is_file()
-                else {}
-            )
-            config = config if isinstance(config, dict) else {}
-            plugins = config.setdefault("plugins", {})
-            enabled = plugins.setdefault("enabled", [])
-            enabled[:] = [item for item in enabled if item != "atelier"]
-            if "profile_call" not in enabled:
-                enabled.append("profile_call")
-            config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    runner_source = Path(__file__).with_name("pack_app.py")
-    shutil.copy2(runner_source, destination / "app")
-    (destination / "app").chmod(0o755)
-    released = AppPack.load(destination)
-    _validate_release_contents(destination)
-    snapshot = build_definition_snapshot(released)
-    cases = []
-    for relative in released.manifest.cases:
-        value = yaml.safe_load((destination / relative).read_text(encoding="utf-8"))
-        if not isinstance(value, dict) or not isinstance(value.get("input"), str):
-            raise ValueError(f"invalid release Case: {relative}")
-        cases.append({"path": relative, "hash": snapshot["cases"][relative], **value})
-    lock = {
-        "schema_version": 1,
-        "pack_id": released.manifest.id,
-        "pack_version": released.manifest.version,
-        "pack_revision": snapshot["revision"],
-        "source_revision": source_snapshot["revision"],
-        "source_provenance": provenance,
-        "git_revision": provenance["revision"] if provenance["kind"] == "git" else None,
-        "definition_snapshot": snapshot,
-        "files": snapshot["files"],
-        "agents": snapshot["agents"],
-        "cases": cases,
-        "contracts": snapshot["contracts"],
-        "manifest": released.manifest.model_dump(mode="json"),
-    }
-    if cases:
-        lock["smoke_case"] = {"id": cases[0].get("id"), "input": cases[0]["input"]}
-    (destination / "app.lock").write_text(
-        json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging_parent = Path(
+        tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent)
     )
-    return {"path": str(destination), "revision": snapshot["revision"], "lock": lock}
+    staging = staging_parent / "release"
+    try:
+        shutil.copytree(pack.root, staging, ignore=_ignore_runtime)
+        if "profile_call" in pack.manifest.collaboration:
+            plugin_source = Path(__file__).resolve().parents[1] / "profile_call"
+            for source in pack.manifest.allowed_calls:
+                distribution = staging / pack.manifest.agents[source].distribution
+                plugin_target = distribution / "plugins" / "profile_call"
+                plugin_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(plugin_source, plugin_target, ignore=_ignore_runtime)
+                distribution_manifest_path = distribution / "distribution.yaml"
+                distribution_manifest = (
+                    yaml.safe_load(distribution_manifest_path.read_text(encoding="utf-8"))
+                    or {}
+                )
+                owned = list(distribution_manifest.get("distribution_owned") or [])
+                if "plugins/profile_call" not in owned:
+                    owned.append("plugins/profile_call")
+                distribution_manifest["distribution_owned"] = owned
+                distribution_manifest_path.write_text(
+                    yaml.safe_dump(distribution_manifest, sort_keys=False),
+                    encoding="utf-8",
+                )
+                config_path = distribution / "config.yaml"
+                config = (
+                    yaml.safe_load(config_path.read_text(encoding="utf-8"))
+                    if config_path.is_file()
+                    else {}
+                )
+                config = config if isinstance(config, dict) else {}
+                plugins = config.setdefault("plugins", {})
+                enabled = plugins.setdefault("enabled", [])
+                enabled[:] = [item for item in enabled if item != "atelier"]
+                if "profile_call" not in enabled:
+                    enabled.append("profile_call")
+                config_path.write_text(
+                    yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+                )
+        runner_source = Path(__file__).with_name("pack_app.py")
+        shutil.copy2(runner_source, staging / "app")
+        (staging / "app").chmod(0o755)
+        released = AppPack.load(staging)
+        snapshot = build_definition_snapshot(released)
+        cases = []
+        for relative in released.manifest.cases:
+            value = yaml.safe_load((staging / relative).read_text(encoding="utf-8"))
+            cases.append({"path": relative, "hash": snapshot["cases"][relative], **value})
+        lock = {
+            "schema_version": 1,
+            "pack_id": released.manifest.id,
+            "pack_version": released.manifest.version,
+            "pack_revision": snapshot["revision"],
+            "source_revision": source_snapshot["revision"],
+            "source_provenance": provenance,
+            "git_revision": provenance["revision"] if provenance["kind"] == "git" else None,
+            "definition_snapshot": snapshot,
+            "files": snapshot["files"],
+            "agents": snapshot["agents"],
+            "cases": cases,
+            "contracts": snapshot["contracts"],
+            "manifest": released.manifest.model_dump(mode="json"),
+        }
+        if cases:
+            lock["smoke_case"] = {"id": cases[0].get("id"), "input": cases[0]["input"]}
+        (staging / "app.lock").write_text(
+            json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        _validate_release_contents(staging)
+        staging.replace(destination)
+        return {"path": str(destination), "revision": snapshot["revision"], "lock": lock}
+    finally:
+        shutil.rmtree(staging_parent, ignore_errors=True)
