@@ -303,7 +303,7 @@ class ExperimentService:
                 terminal = event
         terminal = terminal or await client.status(run_id)
         status = str(terminal.get("status") or terminal.get("event", "")).removeprefix("run.")
-        output = "".join(output_parts) or _terminal_output(terminal)
+        output = _terminal_output(terminal) or "".join(output_parts)
         traces = self.store.traces(session_id)
         assertions = evaluate_assertions(case, output=output, traces=traces)
         trial = {

@@ -399,7 +399,7 @@ class PackRuntime:
             with urllib.request.urlopen(status_request, timeout=30) as response:
                 terminal = json.loads(response.read())
         status = str(terminal.get("status") or terminal.get("event", "")).removeprefix("run.")
-        output = "".join(output_parts) or _event_output(terminal)
+        output = _event_output(terminal) or "".join(output_parts)
         return run_id, status, output
 
     def _case_trace_paths(self, lock: dict[str, Any], instance: str) -> dict[Path, bytes]:
