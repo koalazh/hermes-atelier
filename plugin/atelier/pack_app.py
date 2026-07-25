@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import time
@@ -42,8 +43,15 @@ def _env_values(path: Path) -> dict[str, str]:
     return result
 
 
-def _write_env(path: Path, updates: dict[str, str]) -> None:
+def _write_env(
+    path: Path,
+    updates: dict[str, str],
+    *,
+    remove: set[str] | None = None,
+) -> None:
     values = _env_values(path)
+    for key in remove or set():
+        values.pop(key, None)
     values.update(updates)
     path.parent.mkdir(parents=True, exist_ok=True)
     body = ["# Consumer-owned Hermes runtime configuration. Never commit this file."]
@@ -148,6 +156,11 @@ class PackRuntime:
 
     def _physical(self, instance: str, agent_id: str) -> str:
         return f"{self._validate_instance(instance)}--{agent_id}"
+
+    @staticmethod
+    def _agent_key_env(gateway_key_env: str, agent_id: str) -> str:
+        suffix = re.sub(r"[^A-Za-z0-9]+", "_", agent_id).strip("_").upper()
+        return f"{gateway_key_env}__{suffix}"
 
     def _assert_installed_release(
         self,
@@ -300,6 +313,22 @@ class PackRuntime:
         agent_ports = {
             agent_id: gateway_port + index for index, agent_id in enumerate(ordered_agents)
         }
+        agent_key_envs = {
+            agent_id: self._agent_key_env(gateway_key_env, agent_id)
+            for agent_id in lock["agents"]
+        }
+        agent_keys: dict[str, str] = {}
+        for agent_id in lock["agents"]:
+            profile = self._physical(instance, agent_id)
+            existing = _env_values(self.hermes_home / "profiles" / profile / ".env")
+            key_env = agent_key_envs[agent_id]
+            agent_keys[agent_id] = (
+                gateway_key
+                if agent_id == entry
+                else existing.get(key_env) or secrets.token_urlsafe(32)
+            )
+        trace_directory = self._instance_state(instance) / "call-traces"
+        trace_directory.mkdir(parents=True, exist_ok=True)
         for agent_id, agent_port in agent_ports.items():
             profile = self._physical(instance, agent_id)
             runtime = self.hermes_home / "profiles" / profile
@@ -325,17 +354,23 @@ class PackRuntime:
                 model_key_env,
                 "--force",
             )
-            _write_env(
-                runtime / ".env",
+            allowed_targets = list(manifest.get("allowed_calls", {}).get(agent_id, []))
+            visible_agents = [agent_id, *allowed_targets]
+            runtime_env = {
+                model_key_env: model_key,
+                agent_key_envs[agent_id]: agent_keys[agent_id],
+                "API_SERVER_ENABLED": "true",
+                "API_SERVER_HOST": "127.0.0.1",
+                "API_SERVER_PORT": str(agent_port),
+                "API_SERVER_KEY": agent_keys[agent_id],
+            }
+            runtime_env.update(
                 {
-                    model_key_env: model_key,
-                    gateway_key_env: gateway_key,
-                    "API_SERVER_ENABLED": "true",
-                    "API_SERVER_HOST": "127.0.0.1",
-                    "API_SERVER_PORT": str(agent_port),
-                    "API_SERVER_KEY": gateway_key,
-                },
+                    agent_key_envs[target]: agent_keys[target]
+                    for target in allowed_targets
+                }
             )
+            _write_env(runtime / ".env", runtime_env, remove={gateway_key_env})
             mapping = {
                 "schema_version": 1,
                 "pack_id": lock["pack_id"],
@@ -347,11 +382,12 @@ class PackRuntime:
                     logical: {
                         "profile": self._physical(instance, logical),
                         "base_url": f"http://127.0.0.1:{agent_ports[logical]}",
-                        "api_key_env": gateway_key_env,
+                        "api_key_env": agent_key_envs[logical],
                     }
-                    for logical in lock["agents"]
+                    for logical in visible_agents
                 },
                 "allowed_calls": manifest.get("allowed_calls", {}),
+                "trace": {"directory": str(trace_directory)},
             }
             local = runtime / "local"
             local.mkdir(exist_ok=True)
@@ -379,6 +415,8 @@ class PackRuntime:
                     "runtime_transforms": RUNTIME_TRANSFORMS,
                     "entry_base_url": (f"http://127.0.0.1:{agent_ports[manifest['entry']]}"),
                     "gateway_key_env": gateway_key_env,
+                    "entry_gateway_key_env": agent_key_envs[entry],
+                    "agent_key_envs": agent_key_envs,
                     "gateway_base_port": gateway_port,
                     "agent_ports": agent_ports,
                     "model": model,
@@ -400,7 +438,7 @@ class PackRuntime:
         instance: str,
         runtime: dict[str, Any],
     ) -> str:
-        key_env = str(runtime["gateway_key_env"])
+        key_env = str(runtime.get("entry_gateway_key_env") or runtime["gateway_key_env"])
         entry = str(lock["manifest"]["entry"])
         key = _env_values(
             self.hermes_home / "profiles" / self._physical(instance, entry) / ".env"
@@ -540,25 +578,9 @@ class PackRuntime:
             )
         return instructions
 
-    def _case_trace_paths(self, lock: dict[str, Any], instance: str) -> dict[Path, bytes]:
-        backups: dict[Path, bytes] = {}
-        for agent_id in lock["agents"]:
-            path = (
-                self.hermes_home
-                / "profiles"
-                / self._physical(instance, agent_id)
-                / "local"
-                / "app-runtime.json"
-            )
-            if not path.is_file():
-                raise RuntimeError(f"runtime mapping is missing for {agent_id}")
-            backups[path] = path.read_bytes()
-        return backups
-
-    @staticmethod
-    def _restore_trace_paths(backups: dict[Path, bytes]) -> None:
-        for path, content in backups.items():
-            path.write_bytes(content)
+    def _case_trace_path(self, instance: str, session_id: str) -> Path:
+        name = hashlib.sha256(session_id.encode()).hexdigest() + ".jsonl"
+        return self._instance_state(instance) / "call-traces" / name
 
     @staticmethod
     def _read_traces(path: Path, session_id: str) -> list[dict[str, Any]]:
@@ -653,17 +675,10 @@ class PackRuntime:
             raise RuntimeError(f"Case does not match app.lock: {relative}")
         run_nonce = uuid.uuid4().hex
         session_id = f"pack_case_{str(case.get('id') or 'case')}_{run_nonce}"
-        trace_path = self._instance_state(instance) / "case-runs" / f"{run_nonce}.jsonl"
+        trace_path = self._case_trace_path(instance, session_id)
         trace_path.parent.mkdir(parents=True, exist_ok=True)
-        backups = self._case_trace_paths(lock, instance)
+        trace_path.unlink(missing_ok=True)
         try:
-            for path in backups:
-                mapping = _load_json(path)
-                mapping["trace"] = {"file": str(trace_path)}
-                path.write_text(
-                    json.dumps(mapping, indent=2, ensure_ascii=False) + "\n",
-                    encoding="utf-8",
-                )
             run_id, status, output = self._entry_run(
                 lock=lock,
                 instance=instance,
@@ -673,7 +688,6 @@ class PackRuntime:
             )
             traces = self._read_traces(trace_path, session_id)
         finally:
-            self._restore_trace_paths(backups)
             trace_path.unlink(missing_ok=True)
         assertions = self._assertions(case, output=output, traces=traces)
         contract = self._contract_assertion(lock, output)

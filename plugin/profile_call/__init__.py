@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -44,7 +45,9 @@ PROFILE_CALL_SCHEMA = {
 
 
 class ProfileCallError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, stop_status: str | None = None) -> None:
+        super().__init__(message)
+        self.stop_status = stop_status
 
 
 def _runtime_path() -> Path:
@@ -82,9 +85,15 @@ class ProfileCaller:
         *,
         runtime_path: Path | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        trace_transport: httpx.AsyncBaseTransport | None = None,
+        trace_timeout: float = 0.2,
+        stop_timeout: float = 2.0,
     ) -> None:
         self.runtime_path = (runtime_path or _runtime_path()).resolve()
         self.transport = transport
+        self.trace_transport = trace_transport or transport
+        self.trace_timeout = trace_timeout
+        self.stop_timeout = stop_timeout
 
     def runtime(self) -> dict[str, Any]:
         if not self.runtime_path.is_file():
@@ -151,10 +160,17 @@ class ProfileCaller:
             "task_id": task_id or None,
             "memory_scope_id": memory_scope_id,
         }
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout), transport=self.transport
-        ) as client:
-            if trace and not await self._emit_trace(client, trace, started):
+        async with (
+            httpx.AsyncClient(
+                timeout=httpx.Timeout(timeout),
+                transport=self.transport,
+            ) as client,
+            httpx.AsyncClient(
+                timeout=httpx.Timeout(self.trace_timeout),
+                transport=self.trace_transport,
+            ) as trace_client,
+        ):
+            if trace and not await self._emit_trace(trace_client, trace, started):
                 trace_degraded = True
             response = await client.post(
                 f"{base_url}/v1/runs",
@@ -165,30 +181,43 @@ class ProfileCaller:
             run_id = str(response.json().get("run_id") or "")
             if not run_id:
                 raise ProfileCallError("Hermes did not return a run_id")
-            terminal: dict[str, Any] | None = None
-            async with client.stream(
-                "GET", f"{base_url}/v1/runs/{run_id}/events", headers=headers
-            ) as stream:
-                stream.raise_for_status()
-                async for line in stream.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    raw = line.removeprefix("data:").strip()
-                    if not raw:
-                        continue
-                    event = json.loads(raw)
-                    if _event_type(event) in {
-                        "run.completed",
-                        "run.failed",
-                        "run.cancelled",
-                    }:
-                        terminal = event
-            if terminal is None:
-                response = await client.get(
-                    f"{base_url}/v1/runs/{run_id}", headers=headers
+            try:
+                terminal: dict[str, Any] | None = None
+                async with client.stream(
+                    "GET", f"{base_url}/v1/runs/{run_id}/events", headers=headers
+                ) as stream:
+                    stream.raise_for_status()
+                    async for line in stream.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        raw = line.removeprefix("data:").strip()
+                        if not raw:
+                            continue
+                        event = json.loads(raw)
+                        if not isinstance(event, dict):
+                            raise ProfileCallError("Hermes emitted a non-object SSE event")
+                        if _event_type(event) in {
+                            "run.completed",
+                            "run.failed",
+                            "run.cancelled",
+                        }:
+                            terminal = event
+                if terminal is None:
+                    response = await client.get(
+                        f"{base_url}/v1/runs/{run_id}", headers=headers
+                    )
+                    response.raise_for_status()
+                    terminal = response.json()
+                    if not isinstance(terminal, dict):
+                        raise ProfileCallError("Hermes returned an invalid run status")
+            except asyncio.CancelledError:
+                await self._stop_cancelled_call(client, base_url, headers, run_id)
+                raise
+            except Exception as exc:
+                stop_status = await self._best_effort_stop(
+                    client, base_url, headers, run_id
                 )
-                response.raise_for_status()
-                terminal = response.json()
+                raise ProfileCallError(str(exc), stop_status=stop_status) from exc
             status = str(
                 terminal.get("status") or _event_type(terminal).removeprefix("run.")
             )
@@ -202,7 +231,7 @@ class ProfileCaller:
                 "result": output,
                 "error": terminal.get("error"),
             }
-            if trace and not await self._emit_trace(client, trace, finished):
+            if trace and not await self._emit_trace(trace_client, trace, finished):
                 trace_degraded = True
         if not completed:
             raise ProfileCallError(str(terminal.get("error") or f"target run ended with {status}"))
@@ -221,12 +250,19 @@ class ProfileCaller:
             result["memory_scope_id"] = memory_scope_id
         return result
 
-    @staticmethod
     async def _emit_trace(
-        client: httpx.AsyncClient, trace: dict[str, Any], event: dict[str, Any]
+        self,
+        client: httpx.AsyncClient,
+        trace: dict[str, Any],
+        event: dict[str, Any],
     ) -> bool:
         emitted = True
         file_name = str(trace.get("file") or "")
+        directory_name = str(trace.get("directory") or "")
+        if directory_name:
+            source_session_id = str(event.get("source_session_id") or event["call_id"])
+            name = hashlib.sha256(source_session_id.encode()).hexdigest() + ".jsonl"
+            file_name = str(Path(directory_name).expanduser().resolve() / name)
         if file_name:
             try:
                 path = Path(file_name).expanduser().resolve()
@@ -248,11 +284,53 @@ class ProfileCaller:
         if token:
             headers["Authorization"] = f"Bearer {token}"
         try:
-            response = await client.post(url, headers=headers, json=event)
+            response = await asyncio.wait_for(
+                client.post(url, headers=headers, json=event),
+                timeout=self.trace_timeout,
+            )
             response.raise_for_status()
             return emitted
-        except (httpx.HTTPError, OSError):
+        except (TimeoutError, httpx.HTTPError, OSError):
             return False
+
+    async def _best_effort_stop(
+        self,
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: dict[str, str],
+        run_id: str,
+    ) -> str:
+        try:
+            response = await asyncio.wait_for(
+                client.post(
+                    f"{base_url}/v1/runs/{run_id}/stop",
+                    headers=headers,
+                    json={},
+                ),
+                timeout=self.stop_timeout,
+            )
+            if response.status_code not in {200, 202}:
+                return "stop_unknown"
+            payload = response.json()
+            status = str(payload.get("status") or "") if isinstance(payload, dict) else ""
+            if status in {"cancelled", "canceled", "completed", "failed"}:
+                return "stop_confirmed"
+            return "stop_requested"
+        except (TimeoutError, httpx.HTTPError, OSError, ValueError):
+            return "stop_unknown"
+
+    async def _stop_cancelled_call(
+        self,
+        client: httpx.AsyncClient,
+        base_url: str,
+        headers: dict[str, str],
+        run_id: str,
+    ) -> None:
+        task = asyncio.create_task(self._best_effort_stop(client, base_url, headers, run_id))
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            pass
 
 
 def register(ctx: Any) -> None:
@@ -269,6 +347,9 @@ def register(ctx: Any) -> None:
             )
         except Exception as exc:
             result = {"ok": False, "error_type": "profile_call_failed", "message": str(exc)}
+            stop_status = getattr(exc, "stop_status", None)
+            if stop_status:
+                result["stop_status"] = stop_status
         return json.dumps(result, ensure_ascii=False)
 
     ctx.register_tool(

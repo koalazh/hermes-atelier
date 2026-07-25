@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -93,12 +94,20 @@ def test_pack_install_and_configure_use_hermes_and_local_runtime_state(
         )
     )
     assert mapping["current_agent"] == "dispatcher"
+    assert set(mapping["agents"]) == {"dispatcher", "product"}
     assert mapping["agents"]["dispatcher"]["base_url"] == "http://127.0.0.1:9123"
     assert mapping["agents"]["product"]["base_url"] == "http://127.0.0.1:9124"
+    assert mapping["agents"]["dispatcher"]["api_key_env"] != mapping["agents"]["product"][
+        "api_key_env"
+    ]
     assert "gateway-secret-value" not in json.dumps(mapping)
     env = (home / "profiles" / "customer-a--dispatcher" / ".env").read_text()
     assert "MODEL_KEY=model-secret" in env
-    assert "GATEWAY_KEY=gateway-secret-value" in env
+    assert "GATEWAY_KEY=gateway-secret-value" not in env
+    assert "GATEWAY_KEY__DISPATCHER=gateway-secret-value" in env
+    product_env = (home / "profiles" / "customer-a--product" / ".env").read_text()
+    assert "GATEWAY_KEY__DISPATCHER=" not in product_env
+    assert "GATEWAY_KEY__PRODUCT=" in product_env
     assert "API_SERVER_PORT=9123" in env
     assert any("providers.app_pack.api" in call for call in fake.calls)
     assert any("providers.app_pack.key_env" in call for call in fake.calls)
@@ -345,7 +354,10 @@ def test_pack_case_runner_uses_unique_session_trace_assertions_and_restores_mapp
         session_id = str(kwargs["session_id"])
         sessions.append(session_id)
         mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
-        trace_path = Path(mapping["trace"]["file"])
+        trace_path = (
+            Path(mapping["trace"]["directory"])
+            / f"{hashlib.sha256(session_id.encode()).hexdigest()}.jsonl"
+        )
         trace_path.write_text(
             json.dumps(
                 {
