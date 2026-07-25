@@ -76,4 +76,4 @@ Reviewer 不能：
 
 Draft 只生成候选目录。候选采用时应进入显式 Git branch/worktree，展示 Diff，重新运行相同或明确版本化的 Cases，并由开发者决定是否合并。Atelier 不对当前工作树做隐式 `git apply`。
 
-候选 Experiment 必须声明 `branch`、Git worktree 根目录、`commit`、`baseline_commit`、`baseline_source_revision` 和 `baseline_case_hash`。Atelier 不信任这些自报值：运行前会要求 worktree 干净，核对实际 branch/HEAD、baseline 的规范 commit 与祖先关系、runtime attestation 的 Git provenance，并从 Git tree 重新计算 baseline Pack revision、读取 baseline Case、计算实际 Diff。不存在的 worktree、修改过的 Case、伪造 revision 或与已安装 runtime 不同的 commit 都会被拒绝。Case 变化必须作为新的评价条件单独运行，不能和 Profile 变化合并成“改进”。
+候选 Experiment 必须声明 `branch`、Git worktree 根目录、`commit`、`baseline_commit`、`baseline_source_revision` 和 `baseline_case_hash`。Atelier 不信任这些自报值：运行前会要求 worktree 干净，核对实际 branch/HEAD、baseline 的规范 commit 与祖先关系、runtime attestation 的 Git provenance，并从 Git tree 重新计算 baseline 与 candidate Pack revision、读取 baseline Case、计算限定到所选 Pack 的实际 Diff。candidate 必须真正改变该 Pack；只提交仓库其他文件、修改 Case、伪造 revision、使用不存在的 worktree 或与已安装 runtime 不同的 commit 都会被拒绝。Case 变化必须作为新的评价条件单独运行，不能和 Profile 变化合并成“改进”。

@@ -26,7 +26,7 @@ Atelier V2 面向可信本地开发仓库，不是操作系统沙箱、多租户
 
 ## 路径与发布边界
 
-App Pack Distribution、Case、Contract、公开输出 Contract 与 wrapper `instance` 必须是受约束的相对标识或路径。Validator、Release 和 wrapper 拒绝根目录逃逸，并过滤 `.env`、Memory、Sessions、Logs、Trace、PID、`local/`、`__pycache__`、Python bytecode 与 Atelier 数据。Release 在临时 staging 内完成通用 credential 形状扫描，失败时不会暴露半成品目标目录。
+App Pack Distribution、Case、Contract、公开输出 Contract 与 wrapper `instance` 必须是受约束的相对标识或路径。Validator、Release 和 wrapper 拒绝根目录逃逸；wrapper 还拒绝 `app-packs` 状态根或具体实例目录的 symlink。Release 过滤 `.env`、Memory、Sessions、Logs、Trace、PID、`local/`、`__pycache__`、Python bytecode 与 Atelier 数据，并在临时 staging 内扫描常见 `*_API_KEY`、`*_SECRET`、`*_TOKEN`、`*_PASSWORD`、`*_KEY` credential 赋值形状，失败时不会暴露半成品目标目录。
 
 Builder 规划阶段无写权限；Drafter 只写指定 Draft 根。候选变更进入 Git branch/worktree，不对当前工作树执行隐式 Patch。Project Defense Source Profile 使用随 Distribution 发布的只读示例源码和窄 Plugin，不读取任意宿主目录。
 

@@ -50,8 +50,8 @@ SECRET_PATTERNS = (
     re.compile(rb"sk-[A-Za-z0-9_-]{20,}"),
     re.compile(rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
     re.compile(
-        rb"(?i)\b(?:AWS_SECRET_ACCESS_KEY|GOOGLE_API_KEY|AZURE_CLIENT_SECRET|"
-        rb"API[_-]?KEY|ACCESS[_-]?TOKEN|AUTH[_-]?TOKEN|PASSWORD)\s*[:=]\s*"
+        rb"(?i)\b(?:[A-Z][A-Z0-9_]*_(?:API_KEY|SECRET|TOKEN|PASSWORD|KEY)|"
+        rb"API_KEY|ACCESS_TOKEN|AUTH_TOKEN|PASSWORD)\s*[:=]\s*"
         rb"[\"']?(?!example\b|placeholder\b|changeme\b|replace-|use-a-|set-in-)"
         rb"[A-Za-z0-9/+_.-]{20,}"
     ),

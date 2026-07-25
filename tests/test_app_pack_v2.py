@@ -181,12 +181,16 @@ def test_release_rejects_symlinks_and_secret_shapes(tmp_path: Path) -> None:
     assert not (tmp_path / "release").exists()
 
 
-def test_release_rejects_generic_cloud_credentials_without_leaving_destination(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "name",
+    ["OPENAI_API_KEY", "CLIENT_SECRET", "GITHUB_TOKEN"],
+)
+def test_release_rejects_generic_credentials_without_leaving_destination(
+    tmp_path: Path, name: str
 ) -> None:
     source = create_pack(tmp_path / "support")
     (source / "credentials.txt").write_text(
-        "AWS_SECRET_ACCESS_KEY=" + "A1b2C3d4E5f6G7h8I9j0" * 2 + "\n",
+        f"{name}=" + "A1b2C3d4E5f6G7h8I9j0" * 2 + "\n",
         encoding="utf-8",
     )
     destination = tmp_path / "release"

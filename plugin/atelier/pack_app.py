@@ -134,7 +134,17 @@ class PackRuntime:
         return instance
 
     def _instance_state(self, instance: str) -> Path:
-        return self.hermes_home / "app-packs" / self._validate_instance(instance)
+        state_root = self.hermes_home / "app-packs"
+        if state_root.is_symlink() or state_root.resolve() != state_root:
+            raise ValueError("instance state root must not be a symlink")
+        state = state_root / self._validate_instance(instance)
+        if state.is_symlink():
+            raise ValueError("instance state must not be a symlink")
+        try:
+            state.resolve().relative_to(state_root)
+        except ValueError as exc:
+            raise ValueError("instance state escapes app-packs root") from exc
+        return state
 
     def _physical(self, instance: str, agent_id: str) -> str:
         return f"{self._validate_instance(instance)}--{agent_id}"
@@ -226,7 +236,7 @@ class PackRuntime:
         )
 
     def install(self, *, instance: str) -> None:
-        self._validate_instance(instance)
+        self._instance_state(instance)
         self.hermes_home.mkdir(parents=True, exist_ok=True)
         self._install_agents(self.lock, self.pack_root, instance=instance)
         self._assert_installed_release(self.lock, instance)

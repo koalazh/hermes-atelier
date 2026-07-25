@@ -253,6 +253,9 @@ def _verify_candidate(
     baseline_revision = _git_definition_revision(repository, baseline, pack_relative)
     if baseline_revision != values["baseline_source_revision"]:
         raise ValueError("candidate baseline source revision does not match Git")
+    candidate_revision = _git_definition_revision(repository, commit, pack_relative)
+    if candidate_revision == baseline_revision:
+        raise ValueError("candidate does not change the selected App Pack")
     baseline_case = subprocess.run(
         ["git", "-C", str(repository), "show", f"{baseline}:{case_relative.as_posix()}"],
         check=False,
@@ -270,6 +273,8 @@ def _verify_candidate(
         "--no-ext-diff",
         baseline,
         commit,
+        "--",
+        pack_relative.as_posix(),
     )
     if not diff_summary:
         raise ValueError("candidate has no committed Diff from its baseline")

@@ -506,6 +506,25 @@ def test_all_pack_operations_reject_escaping_instance(
     assert not (tmp_path / "escape").exists()
 
 
+def test_pack_install_rejects_symlinked_instance_state(tmp_path: Path) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    state_root = home / "app-packs"
+    state_root.mkdir(parents=True)
+    (state_root / "customer-a").symlink_to(outside, target_is_directory=True)
+    fake = FakeHermes(home)
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=fake)
+
+    with pytest.raises(ValueError, match="instance state"):
+        runtime.install(instance="customer-a")
+
+    assert fake.calls == []
+    assert not (outside / "app.lock").exists()
+    assert not (outside / "install.json").exists()
+
+
 def test_case_instructions_include_declared_initial_state(tmp_path: Path) -> None:
     runtime = PackRuntime(
         released_pack(tmp_path),

@@ -430,3 +430,35 @@ async def test_experiment_verifies_candidate_git_identity_and_baseline_case(
             runtime_attestation=changed_attestation,
             candidate={**candidate, "commit": changed_commit},
         )
+
+    subprocess.run(
+        ["git", "-C", str(repository), "checkout", "-qb", "unrelated", baseline_commit],
+        check=True,
+    )
+    (repository / "UNRELATED.md").write_text("not part of the App Pack\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "UNRELATED.md"], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "unrelated"], check=True)
+    unrelated_commit = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    unrelated_attestation = runtime_attestation(pack, case_path)
+    unrelated_attestation["source_provenance"] = {
+        "kind": "git",
+        "revision": unrelated_commit,
+    }
+
+    with pytest.raises(ValueError, match="selected App Pack"):
+        await ExperimentService(store).run(
+            pack_root=pack,
+            case_path=case_path,
+            api_key="runtime-secret",
+            runtime_attestation=unrelated_attestation,
+            candidate={
+                **candidate,
+                "branch": "unrelated",
+                "commit": unrelated_commit,
+            },
+        )

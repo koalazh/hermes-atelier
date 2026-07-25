@@ -90,9 +90,11 @@ Studio Experiment `32de1de538104fd58c85c3ef2486ad1d` 不再接受调用方自报
 
 真实 Hermes 还确认 install 会重写 `distribution.yaml` 的物理名称、来源和安装时间。基于该行为增加安装回执变换策略后，Mini VOC 对同一 `d2f65838…` release 执行 `app update`，完整经历停止、重装、重配、重启和 smoke，随后 attestation 再次通过；这正向覆盖了此前因回执时间变化导致的更新失败。
 
+第三轮 Completion Challenge 发现此前“通用 credential”“instance containment”和“Candidate Diff”表述仍过宽：带服务前缀的 credential 名称可漏检，合法 instance 名可被预置 symlink 重定向，仓库无关提交也可产生非空 Candidate Diff。额外修复轮将 Secret 扫描收敛到常见 credential 后缀并保留占位符豁免；统一状态路径助手解析并拒绝状态根/实例 symlink；同时从 Git tree 比较 baseline/candidate Pack revision，并把 Diff 限定到所选 Pack。对应负向探针均先失败后通过。
+
 ## 最终门禁
 
-最终结果：112 个 pytest 全部通过；Ruff、两个 Dashboard JavaScript 文件的 `node --check`、`uv build`、`git diff 117f4d2..HEAD --check` 与两个 Pack 的 validate/release 通过。release 拒绝 symlink、Secret/credential 形状和不安全状态文件，wrapper 可执行且 Definition Snapshot 覆盖全部 33/37 个交付文件。仓库 Secret 形状与私钥文件扫描无命中；本任务使用的 19800–19806 运行服务和 launchd 条目已清理。用户原有 Dashboard 未停止。
+最终结果：115 个 pytest 全部通过；Ruff、两个 Dashboard JavaScript 文件的 `node --check`、`uv build`、`git diff 117f4d2..HEAD --check` 与两个 Pack 的 validate/release 通过。release 拒绝 symlink、Secret/credential 形状和不安全状态文件，wrapper 可执行且 Definition Snapshot 覆盖全部 33/37 个交付文件。仓库 Secret 形状与私钥文件扫描无命中；本任务使用的 19800–19806 运行服务和 launchd 条目已清理。用户原有 Dashboard 未停止。
 
 ## 已知限制
 
