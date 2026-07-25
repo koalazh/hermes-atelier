@@ -99,6 +99,9 @@ def test_release_excludes_runtime_state_and_generates_lock(tmp_path: Path) -> No
     (source / "local").mkdir()
     (source / "local" / "app-runtime.json").write_text("{}", encoding="utf-8")
     (source / "sessions").mkdir()
+    cache = source / "profiles" / "dispatcher" / "plugins" / "sample" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "plugin.cpython-313.pyc").write_bytes(b"runtime cache")
     destination = tmp_path / "release"
 
     result = release_pack(AppPack.load(source), destination, git_revision="abc123")
@@ -107,6 +110,11 @@ def test_release_excludes_runtime_state_and_generates_lock(tmp_path: Path) -> No
     assert not (destination / ".DS_Store").exists()
     assert not (destination / "local").exists()
     assert not (destination / "sessions").exists()
+    assert all(path.name != "__pycache__" for path in destination.rglob("*"))
+    assert all(
+        "__pycache__" not in path
+        for path in result["lock"]["agents"]["dispatcher"]["files"]
+    )
     lock = json.loads((destination / "app.lock").read_text(encoding="utf-8"))
     assert lock["pack_revision"] == result["revision"]
     assert lock["git_revision"] == "abc123"

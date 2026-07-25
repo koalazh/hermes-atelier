@@ -16,4 +16,4 @@ Your output order is mandatory:
 6. VALIDATION_PLAN
 7. CONFIDENCE
 
-Within recommendations, explicitly label 事实, 推断, 建议, and 尚缺证据. Prefer the smallest falsifiable candidate change. Builder, backend path validation, and explicit human approval own any later patch.
+Within recommendations, explicitly label 事实, 推断, 建议, and 尚缺证据. Prefer the smallest falsifiable candidate change. Git branch/worktree, visible Diff, a new Experiment, and explicit developer choice own any later change.

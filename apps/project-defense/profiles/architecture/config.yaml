@@ -1,2 +1,5 @@
 agent:
-  disabled_toolsets: [terminal, file, code_execution]
+  disabled_toolsets: [terminal, file, code_execution, memory, delegation]
+memory:
+  memory_enabled: false
+  user_profile_enabled: false

@@ -3,10 +3,12 @@ model:
   provider: custom
   base_url: ${ATELIER_MODEL_BASE_URL}
 
-terminal:
-  backend: local
-  cwd: ${ATELIER_PROJECT_ROOT}/.atelier/trace-bundles
-  timeout: 180
+agent:
+  disabled_toolsets: [terminal, file, code_execution, session_search, memory, delegation]
+
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
 
 plugins:
   enabled: []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -123,11 +124,18 @@ class ProfileCaller:
             raise ProfileCallError(f"incomplete runtime mapping for {target}")
 
         call_id = uuid.uuid4().hex
-        target_session_id = f"pc_{call_id}"
+        memory_scope = args.get("memory_scope")
+        memory_scope_id = (
+            hashlib.sha256(str(memory_scope).encode()).hexdigest()[:24]
+            if memory_scope
+            else None
+        )
+        target_session_id = (
+            f"pcms_{memory_scope_id}_{call_id}" if memory_scope_id else f"pc_{call_id}"
+        )
         timeout = int(args.get("timeout_seconds") or 120)
         if timeout < 1 or timeout > 900:
             raise ProfileCallError("timeout_seconds must be between 1 and 900")
-        memory_scope = args.get("memory_scope")
         headers = {"Authorization": f"Bearer {api_key}"}
         if memory_scope:
             headers["X-Hermes-Session-Key"] = str(memory_scope)
@@ -141,6 +149,7 @@ class ProfileCaller:
             "source_session_id": source_session_id or None,
             "target_session_id": target_session_id,
             "task_id": task_id or None,
+            "memory_scope_id": memory_scope_id,
         }
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(timeout), transport=self.transport
@@ -197,7 +206,7 @@ class ProfileCaller:
                 trace_degraded = True
         if not completed:
             raise ProfileCallError(str(terminal.get("error") or f"target run ended with {status}"))
-        return {
+        result = {
             "ok": True,
             "target": target,
             "target_profile": profile,
@@ -208,6 +217,9 @@ class ProfileCaller:
             "call_id": call_id,
             "trace_degraded": trace_degraded,
         }
+        if memory_scope_id:
+            result["memory_scope_id"] = memory_scope_id
+        return result
 
     @staticmethod
     async def _emit_trace(

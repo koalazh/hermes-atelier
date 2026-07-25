@@ -106,6 +106,43 @@ def test_pack_install_failure_is_not_reported_as_success(tmp_path: Path) -> None
     assert not (home / "app-packs" / "customer-a" / "app.lock").exists()
 
 
+def test_configure_assigns_base_port_to_entry_even_when_lock_is_sorted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    source = create_pack(tmp_path / "source")
+    manifest_path = source / "app.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["entry"] = "product"
+    manifest["agents"]["dispatcher"]["exposure"] = "internal"
+    manifest["agents"]["product"]["exposure"] = "public"
+    manifest["allowed_calls"] = {"product": ["dispatcher"]}
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    pack = tmp_path / "release"
+    release_pack(AppPack.load(source), pack)
+    home = tmp_path / "hermes"
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=FakeHermes(home))
+    runtime.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+
+    runtime.configure(
+        instance="customer-a",
+        model="test-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+
+    state = json.loads(
+        (home / "app-packs" / "customer-a" / "runtime.json").read_text(encoding="utf-8")
+    )
+    assert state["entry_base_url"] == "http://127.0.0.1:9123"
+    assert state["agent_ports"] == {"product": 9123, "dispatcher": 9124}
+
+
 def test_pack_update_removes_deleted_profile_and_preserves_consumer_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

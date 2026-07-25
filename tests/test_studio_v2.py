@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +13,31 @@ from plugin.atelier.designs import DesignService
 from plugin.atelier.evaluation import ExperimentService, load_case
 from plugin.atelier.studio_store import StudioStore
 from tests.test_app_pack_v2 import create_pack
+
+
+def test_dashboard_api_loads_from_a_standalone_user_plugin(tmp_path: Path) -> None:
+    source = Path(__file__).resolve().parents[1] / "plugin" / "atelier"
+    plugin = tmp_path / "plugins" / "atelier"
+    shutil.copytree(source, plugin, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            (
+                "import sys; "
+                f"sys.path.insert(0, {str(tmp_path / 'plugins')!r}); "
+                "from atelier.dashboard.plugin_api_v2 import router; "
+                "assert router"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 class FakeBuilderClient:
@@ -89,8 +117,10 @@ class FakeExperimentClient:
     def __init__(self, store: StudioStore) -> None:
         self.store = store
         self.session_id = ""
+        self.calls: list[dict[str, Any]] = []
 
     async def start_run(self, **kwargs: Any) -> str:
+        self.calls.append(kwargs)
         self.session_id = kwargs["session_id"]
         self.store.append_trace(
             {
@@ -156,7 +186,35 @@ human_review: Check simulated-data disclosure.
     assert len(experiment["trials"]) == 2
     assert all(trial["assertions_passed"] for trial in experiment["trials"])
     assert all(trial["traces"][0]["target"] == "product" for trial in experiment["trials"])
+    assert all("selected clean state" in call["instructions"] for call in client.calls)
+    assert all(call["memory_scope"] is None for call in client.calls)
     assert "runtime-secret" not in str(store.get_experiment(experiment["id"]))
+
+
+@pytest.mark.asyncio
+async def test_retained_experiment_propagates_explicit_scope_in_instructions(
+    tmp_path: Path,
+) -> None:
+    pack = create_pack(tmp_path / "support")
+    case_path = pack / "cases" / "smoke.yaml"
+    case_path.write_text(
+        "id: retained\ninput: coach me\nmemory_policy: retained\n"
+        "memory_scope: candidate-one\n",
+        encoding="utf-8",
+    )
+    store = StudioStore(tmp_path / ".atelier" / "v2")
+    client = FakeExperimentClient(store)
+
+    await ExperimentService(store, client_factory=lambda *_: client).run(
+        pack_root=pack,
+        case_path=case_path,
+        entry_base_url="http://entry",
+        api_key="runtime-secret",
+        model_fingerprint={"model": "test-model"},
+    )
+
+    assert client.calls[0]["memory_scope"] == "candidate-one"
+    assert "'candidate-one'" in client.calls[0]["instructions"]
 
 
 def test_case_rejects_workflow_and_requires_explicit_retained_scope(tmp_path: Path) -> None:

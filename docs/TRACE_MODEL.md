@@ -36,7 +36,7 @@ started 在目标 dispatch 前尝试上报；completed/failed 在目标真实终
 
 Experiment Trial 创建唯一来源 Session。断言只读取该 `source_session_id` 的 Trace，避免跨 Trial 污染。Trial 同时保存入口 Hermes Run ID、终态和输出；Trace 只是协作证据的一部分。
 
-`clean` 与 `session_only` 不传长期 scope；`retained` 将独立 `memory_scope` 作为 `X-Hermes-Session-Key` 传给入口 Run。Session ID 和长期 Memory scope 不能混为一谈。
+`clean` 与 `session_only` 不传长期 scope；`retained` 将独立 `memory_scope` 传给入口 Run，并要求有状态下游继续显式传递。`profile_call` 只在目标 Session ID 中放截断 SHA-256 派生 ID，不直接放原始 scope；这只是标识符最小化，不是针对低熵 scope 的加密保护。Session ID、原始 scope 与应用的 Profile-local scoped state 不能混为一谈。
 
 ## 降级与证据边界
 

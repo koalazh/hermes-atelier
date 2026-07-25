@@ -4,4 +4,4 @@ description: "Project Defense delivery coach with independent Memory"
 hermes_requires: ">=0.19.0"
 author: "Hermes Atelier"
 license: "MIT"
-distribution_owned: [SOUL.md, config.yaml, skills/, distribution.yaml]
+distribution_owned: [SOUL.md, config.yaml, skills/, plugins/, distribution.yaml]

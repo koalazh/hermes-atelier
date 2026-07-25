@@ -1,0 +1,5 @@
+name: project-defense-coach-memory
+version: 1.0.0
+description: "Caller-scoped durable coaching preferences for Project Defense"
+author: "Hermes Atelier"
+provides_tools: [defense_coach_memory]

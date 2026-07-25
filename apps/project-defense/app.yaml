@@ -19,7 +19,7 @@ agents:
   coach:
     distribution: profiles/coach
     exposure: internal
-    description: Coaches delivery using an independent retained Memory scope when requested.
+    description: Coaches delivery using Profile-local caller-scoped preferences when requested.
 allowed_calls:
   host: [source, architecture, coach]
 collaboration: [profile_call]

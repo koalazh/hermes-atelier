@@ -32,9 +32,9 @@ human_review: 应拒绝无测量支持的数字，并给出有源码证据的更
 
 - `clean`：Trial 使用新的 Session，不传长期 Memory scope；
 - `session_only`：Trial 仍使用新 Session，应用可以在该 Session 内延续上下文；
-- `retained`：Case 必须声明稳定 `memory_scope`，Experiment 通过 `X-Hermes-Session-Key` 显式绑定它。
+- `retained`：Case 必须声明稳定 `memory_scope`。Experiment 通过 Header 绑定入口，并在 Trial instructions 中要求只把同一值传给明确支持 `memory_scope` 的有状态下游工具；应用仍需显式 scoped state 读写，Header 本身不保存内容。
 
-非 retained Case 禁止声明 `memory_scope`。`clean` 不能承诺清空 Hermes 平台的所有外部状态，只承诺 Trial 不主动复用长期作用域。
+非 retained Case 禁止声明 `memory_scope`。`clean` instructions 明确禁止请求 retained downstream state。应用若启用 Hermes 全局 Profile Memory，Experiment 无法从 HTTP 边界证明 caller isolation；这类应用必须使用 fresh 物理实例或关闭全局 Memory。两个 V2 回归 Pack 均不依赖全局 Profile Memory。
 
 ## Experiment 冻结内容
 

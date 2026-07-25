@@ -226,10 +226,28 @@ class ExperimentService:
     ) -> dict[str, Any]:
         trial_id = uuid.uuid4().hex
         session_id = f"atelier_exp_{experiment_id}_{index}_{trial_id[:8]}"
+        if case.memory_policy == "retained":
+            memory_instructions = (
+                "This Experiment explicitly selected retained caller state scope "
+                f"{case.memory_scope!r}. Pass that exact value only to stateful downstream "
+                "tool calls that accept memory_scope. Do not use another scope and do not "
+                "claim persistence without a successful state tool result."
+            )
+        elif case.memory_policy == "session_only":
+            memory_instructions = (
+                "This Experiment selected session_only state. Use only this Hermes Session "
+                "context and do not request retained state in downstream calls."
+            )
+        else:
+            memory_instructions = (
+                "This Experiment selected clean state. Do not request or reuse retained "
+                "caller state in downstream calls."
+            )
         run_id = await client.start_run(
             task=case.input,
             session_id=session_id,
             memory_scope=case.memory_scope if case.memory_policy == "retained" else None,
+            instructions=memory_instructions,
         )
         terminal: dict[str, Any] | None = None
         output_parts: list[str] = []

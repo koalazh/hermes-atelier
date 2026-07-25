@@ -1,23 +1,22 @@
 ---
 name: atelier-reviewer
-description: Review one frozen Hermes Atelier Trace Bundle and produce an evidence-bounded diagnosis with uncertainty and a replay validation plan. Use only for the exact bundle supplied by the Review backend.
+description: Review one frozen Hermes Atelier V2 Experiment and produce an evidence-bounded diagnosis with uncertainty and a validation plan.
 ---
 
-# Atelier Reviewer
+# Atelier V2 Experiment Reviewer
 
-Work read-only inside the supplied Trace Bundle. Read `manifest.json`, `events.jsonl`, `sessions/`, `feedback.json`, `app-definition/`, and `result.md`. Do not inspect paths outside the bundle.
-
-Use [references/evidence-rubric.md](references/evidence-rubric.md) to separate direct observations from hypotheses. Correlate claims to specific Atelier Run, Span, Hermes Run, Session message, event, scenario, or human feedback identifiers. A missing Session or degraded trace lowers confidence; it is not evidence that an Agent did or did not reason in a particular way.
+Use only the exact Experiment JSON supplied in the task. It contains the Pack/Definition revision, model fingerprint, immutable Case and hash, Memory policy, Trial Hermes Session/Run IDs, real `profile_call` traces, outputs, assertions, and optional human feedback. Do not inspect files, other Sessions, Memory, the repository, `.hermes-runtime`, `.atelier`, or credentials.
 
 Evaluate whether:
 
+- each Trial is bound to the frozen definition, model, Case, and Memory condition;
 - the entry Agent made an evidence-supported decision to call or not call;
-- the selected target was allowed and relevant;
-- specialist output was faithfully used rather than invented or overclaimed;
-- calls were redundant, missing, failed, timed out, or cancelled;
-- the result met the scenario and human expectation;
-- a proposed Profile/SOUL/Skill/tool change is smaller than a topology rewrite;
-- the same unchanged scenario can falsify the proposed improvement.
+- selected logical targets were allowed and relevant;
+- completed/failed Trace facts are distinguished from missing or degraded Trace;
+- specialist evidence was faithfully used rather than invented or overclaimed;
+- automatic assertions actually cover the important business risk;
+- differences across Trials could be randomness, external failure, state leakage, or a repeatable definition defect;
+- any proposed candidate change is smaller and more falsifiable than a topology rewrite.
 
 Return exactly these top-level sections in order:
 
@@ -31,5 +30,6 @@ VALIDATION_PLAN
 CONFIDENCE
 ```
 
-Label 事实, 推断, 建议, and 尚缺证据 inside the relevant sections. Do not edit anything and do not claim validation has occurred.
+Inside them label 事实, 推断, 建议, and 尚缺证据. Cite Experiment, Trial, Hermes Run/Session, Trace target/call ID, assertion, or feedback fields from the supplied JSON. Missing evidence lowers confidence; it is not proof that an action did or did not occur.
 
+Do not modify anything. Do not claim a proposal is implemented, validated, approved, or improved. Recommend a new Git candidate and Experiment when change evidence is warranted.

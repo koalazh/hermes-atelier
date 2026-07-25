@@ -67,7 +67,7 @@ contracts: []
 
 - `stateless`：应用定义不依赖跨请求状态；Hermes 仍可能保留平台级运行记录。
 - `session_only`：同一 Hermes Session 内允许上下文延续，不声明跨 Session 长期状态。
-- `caller_scoped`：Consumer 可通过稳定的 `X-Hermes-Session-Key` 或 `profile_call.memory_scope` 显式选择长期作用域。
+- `caller_scoped`：应用只在 Consumer 显式选择的稳定 scope 下访问长期状态。Hermes 0.19.0 的全局 Profile Memory 不按 Session-Key 隔离；应用必须使用自己的 Profile-local scoped store 或由 Consumer 为 caller 隔离物理实例。Project Defense 选择前者。
 
 更新兼容提示与状态所有权分离：
 

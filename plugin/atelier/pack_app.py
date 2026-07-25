@@ -158,8 +158,10 @@ class PackRuntime:
             raise ValueError("gateway port range is out of range")
 
         manifest = lock["manifest"]
+        entry = str(manifest["entry"])
+        ordered_agents = [entry, *(agent_id for agent_id in lock["agents"] if agent_id != entry)]
         agent_ports = {
-            agent_id: gateway_port + index for index, agent_id in enumerate(lock["agents"])
+            agent_id: gateway_port + index for index, agent_id in enumerate(ordered_agents)
         }
         for agent_id, agent_port in agent_ports.items():
             profile = self._physical(instance, agent_id)

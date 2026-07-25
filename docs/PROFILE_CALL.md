@@ -70,9 +70,9 @@ Wrapper 为每个物理 Profile 生成完整映射，但校验始终以 `current
 
 ## Session 与 Memory
 
-来源 Session ID 只用于关联；目标调用总是创建 `pc_<call-id>` 形式的独立 Hermes Session。`/v1/runs` 的 `session_id` 是调用身份，不等同于 Hermes Chat 的多轮消息载入。
+来源 Session ID 只用于关联；clean 调用创建 `pc_<call-id>` 形式的独立 Hermes Session。显式 `memory_scope` 会被 SHA-256 后截取为派生 scope ID，目标 Session 为 `pcms_<scope-id>_<call-id>`；原始 scope 不写入 Session ID 或 Trace。该 hash 用于标识符最小化，不应被当作低熵 scope 的加密保护。`/v1/runs` 的 `session_id` 是调用身份，不等同于 Hermes Chat 的多轮消息载入。
 
-只有显式 `memory_scope` 才发送 `X-Hermes-Session-Key`。这使长期 Memory 与一次调用 Session 分离，也避免所有调用意外共享状态。
+只有显式 `memory_scope` 才发送 `X-Hermes-Session-Key` 并生成 scope ID。该 Header 不会自动写 Memory；Hermes 0.19.0 的 `MEMORY.md` / `USER.md` 仍是物理 Profile 全局文件。需要 caller isolation 的应用应让自己的状态工具从 `pcms_` Session 读取 scope ID，并把状态保存在 Profile `local/` 下；只有工具成功后才能声称已经保存。Project Defense Coach 使用这一模式并禁用 Hermes 全局 Memory。
 
 ## Trace 失败语义
 

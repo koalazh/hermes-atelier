@@ -22,9 +22,11 @@ Atelier V2 面向可信本地开发仓库，不是操作系统沙箱、多租户
 
 当前不使用 multiplex，因为 Hermes 0.19.0 的 Plugin Manager 无法隔离 Profile 私有 Plugins。这是能力约束，不是允许任意暴露多个端口的理由。
 
+示例业务 Profiles 禁用 Hermes 通用 delegation toolset，避免模型绕过 `profile_call` 的 allowlist、目标身份和 Trace 语义。需要新的协作边时，应先在 `allowed_calls` 中显式建模，而不是恢复无约束 delegation。
+
 ## 路径与发布边界
 
-App Pack Distribution、Case 和 Contract 路径必须是 Pack 内相对路径。Validator 和 Release 拒绝根目录逃逸，并过滤 `.env`、Memory、Sessions、Logs、Trace、PID、`local/` 与 Atelier 数据。
+App Pack Distribution、Case 和 Contract 路径必须是 Pack 内相对路径。Validator 和 Release 拒绝根目录逃逸，并过滤 `.env`、Memory、Sessions、Logs、Trace、PID、`local/`、`__pycache__`、Python bytecode 与 Atelier 数据。
 
 Builder 规划阶段无写权限；Drafter 只写指定 Draft 根。候选变更进入 Git branch/worktree，不对当前工作树执行隐式 Patch。Project Defense Source Profile 使用随 Distribution 发布的只读示例源码和窄 Plugin，不读取任意宿主目录。
 

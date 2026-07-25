@@ -16,14 +16,19 @@ class HermesHTTPClient:
         self._client = client
 
     async def _request(
-        self, method: str, path: str, *, json_body: dict[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        timeout: float | None = 30,
     ) -> httpx.Response:
         if self._client is not None:
             response = await self._client.request(
                 method, f"{self.base_url}{path}", headers=self._headers, json=json_body
             )
         else:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.request(
                     method, f"{self.base_url}{path}", headers=self._headers, json=json_body
                 )
@@ -92,7 +97,12 @@ class HermesHTTPClient:
         body: dict[str, Any] = {"message": message}
         if instructions:
             body["instructions"] = instructions
-        response = await self._request("POST", f"/api/sessions/{session_id}/chat", json_body=body)
+        response = await self._request(
+            "POST",
+            f"/api/sessions/{session_id}/chat",
+            json_body=body,
+            timeout=None,
+        )
         if response.status_code != 200:
             raise AtelierError(
                 "session_failed",

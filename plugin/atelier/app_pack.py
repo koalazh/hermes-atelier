@@ -28,6 +28,7 @@ RUNTIME_NAMES = {
     ".atelier",
     ".DS_Store",
     ".env",
+    "__pycache__",
     "auth.json",
     "local",
     "memories",
@@ -247,7 +248,11 @@ def build_definition_snapshot(pack: AppPack) -> dict[str, Any]:
 
 
 def _ignore_runtime(_: str, names: list[str]) -> set[str]:
-    return {name for name in names if name in RUNTIME_NAMES or name == "app.lock"}
+    return {
+        name
+        for name in names
+        if name in RUNTIME_NAMES or name == "app.lock" or name.endswith((".pyc", ".pyo"))
+    }
 
 
 def release_pack(
@@ -266,7 +271,7 @@ def release_pack(
             distribution = destination / pack.manifest.agents[source].distribution
             plugin_target = distribution / "plugins" / "profile_call"
             plugin_target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(plugin_source, plugin_target)
+            shutil.copytree(plugin_source, plugin_target, ignore=_ignore_runtime)
             distribution_manifest_path = distribution / "distribution.yaml"
             distribution_manifest = (
                 yaml.safe_load(distribution_manifest_path.read_text(encoding="utf-8")) or {}

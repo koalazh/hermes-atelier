@@ -107,6 +107,37 @@ async def test_trace_sink_failure_does_not_break_business_call(
 
 
 @pytest.mark.asyncio
+async def test_retained_scope_is_hashed_into_target_session_without_leaking_raw_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / "local" / "app-runtime.json"
+    write_runtime(runtime)
+    monkeypatch.setenv("PROFILE_CALL_API_KEY", "runtime-only-key")
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/runs"):
+            captured.update(json.loads(request.content))
+            captured["scope_header"] = request.headers.get("X-Hermes-Session-Key")
+            return httpx.Response(202, json={"run_id": "run-retained"})
+        return httpx.Response(200, text='data: {"event":"run.completed","output":"ok"}\n\n')
+
+    result = await ProfileCaller(
+        runtime_path=runtime, transport=httpx.MockTransport(handler)
+    ).call(
+        {
+            "target": "product",
+            "task": "Retained work",
+            "memory_scope": "candidate-private-scope",
+        }
+    )
+
+    assert str(captured["session_id"]).startswith(f"pcms_{result['memory_scope_id']}_")
+    assert captured["scope_header"] == "candidate-private-scope"
+    assert "candidate-private-scope" not in str(captured["session_id"])
+
+
+@pytest.mark.asyncio
 async def test_profile_call_enforces_logical_allowed_calls(tmp_path: Path) -> None:
     runtime = tmp_path / "local" / "app-runtime.json"
     write_runtime(runtime)

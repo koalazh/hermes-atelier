@@ -45,7 +45,7 @@ Source 的 `sample-source/` 和窄只读 Plugin 属于 Distribution，不需要�
 
 ## 多轮与长期状态
 
-普通多轮对话复用 Hermes Session ID。只有确实需要稳定表达偏好时，Consumer 才提供 `X-Hermes-Session-Key`；不要把临时 Session ID 当长期 Memory scope。
+普通多轮对话复用 Hermes Session ID。只有确实需要稳定表达偏好时，Consumer 或上游 Agent 才选择明确 `memory_scope`；Host 会把它传给 Coach，`profile_call` 生成不含原文的派生 scope ID，Coach 将偏好写入自身 `local/`。不要把临时 Session ID 当长期 scope，也不要使用 Hermes 全局 User Profile 代替 caller isolation。
 
 ## 更新与停止
 

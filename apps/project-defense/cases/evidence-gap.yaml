@@ -6,4 +6,7 @@ assertions:
     required: [source]
   output:
     must_contain: [p99]
-human_review: 应拒绝无测量支持的数字，并给出有源码证据的更窄主张。
+    must_not_claim:
+      - 消除了我们对 Redis 的线上依赖
+      - 3 个服务缩减到 1 个进程内模块
+human_review: 应拒绝无测量支持的数字；任何替代主张也必须有源码证据，不能用另一段合理故事替换原始杜撰。

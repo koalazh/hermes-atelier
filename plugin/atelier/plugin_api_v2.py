@@ -1,22 +1,17 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-if str(REPOSITORY_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPOSITORY_ROOT))
-
-from plugin.atelier.app_pack import AppPack, build_definition_snapshot, release_pack  # noqa: E402
-from plugin.atelier.designs import DesignService  # noqa: E402
-from plugin.atelier.evaluation import ExperimentService, load_case  # noqa: E402
-from plugin.atelier.paths import apps_root, atelier_root, ensure_within  # noqa: E402
-from plugin.atelier.studio_store import StudioStore  # noqa: E402
+from .app_pack import AppPack, build_definition_snapshot, release_pack
+from .designs import DesignService
+from .evaluation import ExperimentService, load_case
+from .paths import apps_root, atelier_root, ensure_within
+from .studio_store import StudioStore
 
 router = APIRouter()
 store = StudioStore(atelier_root() / "v2")

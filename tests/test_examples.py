@@ -68,6 +68,14 @@ def test_mini_voc_specialists_expose_distinct_simulated_tools() -> None:
     with pytest.raises(RuntimeError, match="simulated transaction provider unavailable"):
         context.tools["voc_transaction_lookup"]({"order_id": "ORD-FAIL"})
 
+    for profile in ("dispatcher", "product", "transaction"):
+        config = yaml.safe_load((app / profile / "config.yaml").read_text())
+        assert config["memory"] == {
+            "memory_enabled": False,
+            "user_profile_enabled": False,
+        }
+        assert "delegation" in config["agent"]["disabled_toolsets"]
+
 
 def test_source_reader_is_constrained_and_source_profile_has_no_write_tools() -> None:
     source = project_root() / "apps" / "project-defense" / "profiles" / "source"
@@ -115,6 +123,56 @@ def test_project_defense_stable_memory_is_scoped_to_coaching() -> None:
     assert evidence["memory_policy"] == "clean"
     assert architecture["memory_policy"] == "session_only"
 
+    profiles = project_root() / "apps" / "project-defense" / "profiles"
+    host_config = yaml.safe_load((profiles / "host" / "config.yaml").read_text())
+    assert "session_search" in host_config["agent"]["disabled_toolsets"]
+    for profile in ("host", "source", "architecture", "coach"):
+        config = yaml.safe_load((profiles / profile / "config.yaml").read_text())
+        assert config["memory"] == {
+            "memory_enabled": False,
+            "user_profile_enabled": False,
+        }
+        assert "delegation" in config["agent"]["disabled_toolsets"]
+    host = (profiles / "host" / "SOUL.md").read_text(encoding="utf-8")
+    coach = (profiles / "coach" / "SOUL.md").read_text(encoding="utf-8")
+    assert "does not itself write state" in host
+    assert "A clean call has no scope" in coach
+    assert "Never invent concrete metrics" in coach
+
+
+def test_project_defense_coach_memory_is_caller_scoped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plugin = load_plugin(
+        project_root()
+        / "apps"
+        / "project-defense"
+        / "profiles"
+        / "coach"
+        / "plugins"
+        / "project-defense-coach-memory"
+        / "__init__.py"
+    )
+    monkeypatch.setenv("DEFENSE_COACH_MEMORY_ROOT", str(tmp_path / "scoped-memory"))
+    context = ToolContext()
+    plugin.register(context)
+    handler = context.tools["defense_coach_memory"]
+    first_scope = "pcms_0123456789abcdef01234567_0123456789abcdef0123456789abcdef"
+    other_scope = "pcms_89abcdef0123456789abcdef_0123456789abcdef0123456789abcdef"
+    preference = "Reject unsupported metrics"
+
+    stored = json.loads(
+        handler({"action": "add", "content": preference}, session_id=first_scope)
+    )
+    retained = json.loads(handler({"action": "list"}, session_id=first_scope))
+    isolated = json.loads(handler({"action": "list"}, session_id=other_scope))
+    clean = json.loads(handler({"action": "list"}, session_id="pc_clean_call"))
+
+    assert stored["stored"] is True
+    assert retained["entries"] == [preference]
+    assert isolated["entries"] == []
+    assert clean["ok"] is False
+
 
 def test_project_defense_architecture_forbids_unmeasured_numbers() -> None:
     profile = project_root() / "apps" / "project-defense" / "profiles" / "architecture"
@@ -125,6 +183,19 @@ def test_project_defense_architecture_forbids_unmeasured_numbers() -> None:
 
     assert "Never introduce numerical latency" in soul
     assert "do not supply numerical performance estimates" in skill
+
+    case = yaml.safe_load(
+        (
+            project_root()
+            / "apps"
+            / "project-defense"
+            / "cases"
+            / "evidence-gap.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    assert "3 个服务缩减到 1 个进程内模块" in case["assertions"]["output"][
+        "must_not_claim"
+    ]
 
 
 def test_example_definition_snapshot_tracks_profile_assets() -> None:
