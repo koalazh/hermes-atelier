@@ -1,0 +1,10 @@
+name: delegation-note
+version: 0.1.0
+description: Minimal native-delegation application.
+hermes_requires: ">=0.19.0"
+author: Hermes Atelier
+license: MIT
+distribution_owned:
+  - SOUL.md
+  - config.yaml
+  - distribution.yaml

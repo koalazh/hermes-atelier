@@ -1,0 +1,7 @@
+id: smoke
+input: "Say hello to a developer building a small Hermes demo."
+memory_policy: new_session
+assertions:
+  output:
+    must_contain: [hello]
+human_review: The answer should be concise and must not imply that another Agent was called.

@@ -1,0 +1,10 @@
+name: single-profile-hello
+version: 0.1.0
+description: Minimal single-Profile greeting application.
+hermes_requires: ">=0.19.0"
+author: Hermes Atelier
+license: MIT
+distribution_owned:
+  - SOUL.md
+  - config.yaml
+  - distribution.yaml

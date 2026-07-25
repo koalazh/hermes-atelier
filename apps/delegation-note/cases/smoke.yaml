@@ -1,0 +1,7 @@
+id: smoke
+input: "Use native delegation for one independent risk check, then give me a short implementation note for a health endpoint."
+memory_policy: new_session
+assertions:
+  output:
+    must_contain: [health]
+human_review: The note should identify a concrete risk; absence of profile_call Trace is not evidence that delegation did not occur.

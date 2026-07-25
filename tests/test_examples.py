@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import pytest
 import yaml
 
-from plugin.atelier.app_pack import AppPack, build_definition_snapshot
+from plugin.atelier.app_pack import AppPack, build_definition_snapshot, release_pack
 from plugin.atelier.paths import project_root
 
 
@@ -74,7 +75,7 @@ def test_mini_voc_specialists_expose_distinct_simulated_tools() -> None:
             "memory_enabled": False,
             "user_profile_enabled": False,
         }
-        assert "delegation" in config["agent"]["disabled_toolsets"]
+        assert "delegation" not in config["agent"]["disabled_toolsets"]
 
 
 def test_source_reader_is_constrained_and_source_profile_has_no_write_tools() -> None:
@@ -112,6 +113,33 @@ def test_examples_cover_no_call_multi_call_failure_and_evidence_gap() -> None:
     assert {"evidence-gap", "architecture", "coach-only"} <= defense_cases
 
 
+def test_counterexample_packs_do_not_depend_on_profile_call(tmp_path: Path) -> None:
+    root = project_root() / "apps"
+    single = AppPack.load(root / "single-profile-hello")
+    delegated = AppPack.load(root / "delegation-note")
+
+    assert len(single.manifest.agents) == 1
+    assert single.manifest.allowed_calls == {}
+    assert single.manifest.collaboration == []
+    assert delegated.manifest.allowed_calls == {}
+    assert delegated.manifest.collaboration == []
+    delegated_config = yaml.safe_load(
+        (
+            delegated.root
+            / delegated.manifest.agents[delegated.entry].distribution
+            / "config.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    assert "delegation" not in delegated_config["agent"]["disabled_toolsets"]
+
+    for pack in (single, delegated):
+        source = tmp_path / f"{pack.manifest.id}-source"
+        shutil.copytree(pack.root, source)
+        destination = tmp_path / pack.manifest.id
+        release_pack(AppPack.load(source), destination)
+        assert not list(destination.rglob("profile_call"))
+
+
 def test_project_defense_stable_memory_is_scoped_to_coaching() -> None:
     cases = project_root() / "apps" / "project-defense" / "cases"
     coach = yaml.safe_load((cases / "coach-only.yaml").read_text(encoding="utf-8"))
@@ -119,9 +147,9 @@ def test_project_defense_stable_memory_is_scoped_to_coaching() -> None:
     architecture = yaml.safe_load((cases / "architecture.yaml").read_text(encoding="utf-8"))
 
     assert coach["memory_scope"] == "demo-candidate-durable-queue"
-    assert coach["memory_policy"] == "retained"
-    assert evidence["memory_policy"] == "clean"
-    assert architecture["memory_policy"] == "session_only"
+    assert coach["memory_policy"] == "retained_scope"
+    assert evidence["memory_policy"] == "new_session"
+    assert architecture["memory_policy"] == "new_session"
 
     profiles = project_root() / "apps" / "project-defense" / "profiles"
     host_config = yaml.safe_load((profiles / "host" / "config.yaml").read_text())
@@ -132,11 +160,11 @@ def test_project_defense_stable_memory_is_scoped_to_coaching() -> None:
             "memory_enabled": False,
             "user_profile_enabled": False,
         }
-        assert "delegation" in config["agent"]["disabled_toolsets"]
+        assert "delegation" not in config["agent"]["disabled_toolsets"]
     host = (profiles / "host" / "SOUL.md").read_text(encoding="utf-8")
     coach = (profiles / "coach" / "SOUL.md").read_text(encoding="utf-8")
     assert "does not itself write state" in host
-    assert "A clean call has no scope" in coach
+    assert "A new-session call has no scope" in coach
     assert "Never invent concrete metrics" in coach
 
 

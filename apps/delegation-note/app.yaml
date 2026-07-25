@@ -1,0 +1,20 @@
+schema_version: 2
+id: delegation-note
+version: 0.1.0
+description: Minimal Pack that leaves Hermes native delegation available without profile_call.
+entry: note
+agents:
+  note:
+    distribution: profiles/note
+    exposure: public
+    description: Produces a concise implementation note and may delegate an independent check.
+allowed_calls: {}
+collaboration: []
+public_api:
+  protocol: openai
+  endpoints: [/v1/responses, /v1/chat/completions]
+state_policy: stateless
+state_compatibility: preserve
+cases:
+  - cases/smoke.yaml
+contracts: []

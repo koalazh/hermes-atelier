@@ -1,0 +1,20 @@
+schema_version: 2
+id: single-profile-hello
+version: 0.1.0
+description: Minimal single-Profile HTTP App Pack without profile_call.
+entry: hello
+agents:
+  hello:
+    distribution: profiles/hello
+    exposure: public
+    description: Returns a concise greeting and states what input it received.
+allowed_calls: {}
+collaboration: []
+public_api:
+  protocol: openai
+  endpoints: [/v1/responses, /v1/chat/completions]
+state_policy: stateless
+state_compatibility: preserve
+cases:
+  - cases/smoke.yaml
+contracts: []
