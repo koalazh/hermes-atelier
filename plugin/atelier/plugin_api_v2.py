@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 from .app_pack import AppPack, build_definition_snapshot, release_pack
 from .designs import DesignService
 from .evaluation import ExperimentService, load_case
+from .pack_app import PackRuntime
 from .paths import apps_root, atelier_root, ensure_within
 from .studio_store import StudioStore
 
@@ -34,9 +36,7 @@ class CandidateRecord(BaseModel):
 class ExperimentCreate(BaseModel):
     pack_id: str
     case_id: str
-    entry_base_url: str
-    api_key_env: str
-    model_fingerprint: dict[str, Any]
+    runtime_instance: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     trial_count: int = Field(default=1, ge=1, le=20)
     candidate: dict[str, str] | None = None
 
@@ -78,6 +78,18 @@ def _designs() -> DesignService:
 def _pack(pack_id: str) -> AppPack:
     root = ensure_within(apps_root() / pack_id, apps_root())
     return AppPack.load(root)
+
+
+def _runtime(instance: str) -> PackRuntime:
+    home = Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser().resolve()
+    state = ensure_within(home / "app-packs" / instance, home / "app-packs")
+    install_path = state / "install.json"
+    if not install_path.is_file():
+        raise ValueError(f"App Pack runtime instance is not installed: {instance}")
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    if not isinstance(install, dict) or not install.get("pack_path"):
+        raise ValueError(f"invalid App Pack install state: {instance}")
+    return PackRuntime(Path(str(install["pack_path"])), hermes_home=home)
 
 
 def _pack_summary(pack: AppPack) -> dict[str, Any]:
@@ -172,17 +184,20 @@ async def run_experiment(request: ExperimentCreate):
         ]
         if len(matching) != 1:
             raise ValueError(f"unknown Case: {request.case_id}")
-        api_key = os.environ.get(request.api_key_env, "")
+        runtime = _runtime(request.runtime_instance)
+        attestation = runtime.attest(instance=request.runtime_instance)
+        key_env = str(attestation["gateway_key_env"])
+        api_key = os.environ.get(key_env, "")
         if not api_key:
-            raise ValueError(f"missing API key environment: {request.api_key_env}")
+            raise ValueError(f"missing API key environment: {key_env}")
         return await ExperimentService(store).run(
             pack_root=pack.root,
             case_path=pack.root / matching[0],
-            entry_base_url=request.entry_base_url,
             api_key=api_key,
-            model_fingerprint=request.model_fingerprint,
+            runtime_attestation=attestation,
             trial_count=request.trial_count,
             candidate=request.candidate,
+            attestation_refresh=lambda: runtime.attest(instance=request.runtime_instance),
         )
     except Exception as exc:
         raise _error(exc) from exc

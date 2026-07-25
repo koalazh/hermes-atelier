@@ -22,7 +22,10 @@ class FakeHermes:
             raise RuntimeError("Hermes failed")
         if "install" in args:
             name = args[args.index("--name") + 1]
-            (self.root / "profiles" / name).mkdir(parents=True, exist_ok=True)
+            source = Path(args[args.index("install") + 1])
+            import shutil
+
+            shutil.copytree(source, self.root / "profiles" / name, dirs_exist_ok=True)
         if "delete" in args:
             name = args[args.index("delete") + 1]
             profile = self.root / "profiles" / name
@@ -237,3 +240,143 @@ def test_pack_update_smoke_failure_restores_old_mapping(
     )
     assert set(mapping["agents"]) == {"dispatcher", "product"}
     assert (home / "profiles" / "customer-a--product").is_dir()
+
+
+def test_pack_case_runner_uses_unique_session_trace_assertions_and_restores_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    source = create_pack(tmp_path / "source")
+    contracts = source / "contracts"
+    contracts.mkdir()
+    (contracts / "output.schema.json").write_text(
+        json.dumps(
+            {
+                "type": "object",
+                "properties": {
+                    "known": {"type": "array", "items": {"type": "string"}},
+                    "uncertain": {"type": "array", "items": {"type": "string"}},
+                    "next_action": {"type": "string"},
+                },
+                "required": ["known", "uncertain", "next_action"],
+                "additionalProperties": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest_path = source / "app.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["public_api"]["output_contract"] = "contracts/output.schema.json"
+    manifest["contracts"] = ["contracts/output.schema.json"]
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    case_path = source / "cases" / "smoke.yaml"
+    case_path.write_text(
+        yaml.safe_dump(
+            {
+                "id": "smoke",
+                "input": "hello",
+                "memory_policy": "clean",
+                "assertions": {
+                    "calls": {"required": ["product"]},
+                    "output": {"must_contain": ["evidence"]},
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    pack = tmp_path / "release"
+    release_pack(AppPack.load(source), pack)
+    home = tmp_path / "hermes"
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=FakeHermes(home))
+    runtime.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+    runtime.configure(
+        instance="customer-a",
+        model="test-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+    mapping_path = (
+        home / "profiles" / "customer-a--dispatcher" / "local" / "app-runtime.json"
+    )
+    original_mapping = mapping_path.read_bytes()
+    sessions: list[str] = []
+
+    def entry_run(**kwargs: object) -> tuple[str, str, str]:
+        session_id = str(kwargs["session_id"])
+        sessions.append(session_id)
+        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        trace_path = Path(mapping["trace"]["file"])
+        trace_path.write_text(
+            json.dumps(
+                {
+                    "event": "profile_call.completed",
+                    "source_session_id": session_id,
+                    "target": "product",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return (
+            "run-entry",
+            "completed",
+            json.dumps(
+                {
+                    "known": ["product evidence"],
+                    "uncertain": [],
+                    "next_action": "continue",
+                }
+            ),
+        )
+
+    monkeypatch.setattr(runtime, "_entry_run", entry_run)
+
+    first = runtime.run_cases(instance="customer-a", case_id="smoke")
+    second = runtime.run_cases(instance="customer-a", case_id="smoke")
+
+    assert first["passed"] is True
+    assert second["passed"] is True
+    assert sessions[0] != sessions[1]
+    assert first["cases"][0]["traces"][0]["target"] == "product"
+    assert first["cases"][0]["assertions"][-1]["kind"] == "contract.output"
+    assert mapping_path.read_bytes() == original_mapping
+
+
+def test_pack_attestation_binds_release_runtime_definition_and_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=FakeHermes(home))
+    runtime.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+    runtime.configure(
+        instance="customer-a",
+        model="test-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+
+    attestation = runtime.attest(instance="customer-a")
+
+    assert attestation["verified"] is True
+    assert attestation["model_fingerprint"] == {
+        "provider": "custom:app_pack",
+        "model": "test-model",
+        "base_url": "https://model.invalid/v1",
+    }
+    assert attestation["pack_revision"] == attestation["definition_snapshot"]["revision"]
+
+    soul = home / "profiles" / "customer-a--dispatcher" / "SOUL.md"
+    soul.write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="installed Profile asset changed"):
+        runtime.attest(instance="customer-a")

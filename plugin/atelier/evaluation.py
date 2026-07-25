@@ -157,11 +157,11 @@ class ExperimentService:
         *,
         pack_root: Path,
         case_path: Path,
-        entry_base_url: str,
         api_key: str,
-        model_fingerprint: dict[str, Any],
+        runtime_attestation: dict[str, Any],
         trial_count: int = 1,
         candidate: dict[str, str] | None = None,
+        attestation_refresh: Callable[[], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if trial_count < 1 or trial_count > 20:
             raise ValueError("trial_count must be between 1 and 20")
@@ -169,15 +169,52 @@ class ExperimentService:
         case, case_hash = load_case(case_path)
         if case_path.resolve().parent != (pack.root / "cases").resolve():
             raise ValueError("Case must belong to the App Pack cases directory")
-        snapshot = build_definition_snapshot(pack)
+        source_snapshot = build_definition_snapshot(pack)
+        if runtime_attestation.get("verified") is not True:
+            raise ValueError("Experiment requires a verified runtime attestation")
+        if (
+            runtime_attestation.get("pack_id") != pack.manifest.id
+            or runtime_attestation.get("pack_version") != pack.manifest.version
+        ):
+            raise ValueError("runtime App Pack identity does not match the selected source Pack")
+        if runtime_attestation.get("source_revision") != source_snapshot["revision"]:
+            raise ValueError(
+                "runtime App Pack was not released from the selected source definition"
+            )
+        runtime_cases = [
+            item
+            for item in runtime_attestation.get("cases") or []
+            if item.get("id") == case.id
+        ]
+        if len(runtime_cases) != 1 or runtime_cases[0].get("hash") != case_hash:
+            raise ValueError("runtime Case does not match the selected source Case")
+        definition_snapshot = runtime_attestation.get("definition_snapshot")
+        if (
+            not isinstance(definition_snapshot, dict)
+            or definition_snapshot.get("revision") != runtime_attestation.get("pack_revision")
+        ):
+            raise ValueError("runtime definition snapshot does not match its Pack revision")
+        model_fingerprint = runtime_attestation.get("model_fingerprint")
+        entry_base_url = str(runtime_attestation.get("entry_base_url") or "")
+        if not isinstance(model_fingerprint, dict) or not entry_base_url:
+            raise ValueError("runtime model or entry endpoint attestation is incomplete")
+        if candidate:
+            baseline_case_hash = str(candidate.get("baseline_case_hash") or "")
+            baseline_pack_revision = str(candidate.get("baseline_pack_revision") or "")
+            if not baseline_case_hash or not baseline_pack_revision:
+                raise ValueError("candidate requires baseline Pack revision and Case hash")
+            if baseline_case_hash != case_hash:
+                raise ValueError("candidate changed the Case; use a separate evaluation condition")
         experiment_id = uuid.uuid4().hex
         experiment: dict[str, Any] = {
             "id": experiment_id,
             "status": "running",
             "pack_id": pack.manifest.id,
             "pack_version": pack.manifest.version,
-            "pack_revision": snapshot["revision"],
-            "definition_snapshot": snapshot,
+            "pack_revision": runtime_attestation["pack_revision"],
+            "source_revision": source_snapshot["revision"],
+            "source_provenance": runtime_attestation["source_provenance"],
+            "definition_snapshot": definition_snapshot,
             "model_fingerprint": redact(model_fingerprint),
             "case": case.model_dump(mode="json"),
             "case_path": str(case_path.resolve()),
@@ -204,6 +241,14 @@ class ExperimentService:
             _, current_hash = load_case(case_path)
             if current_hash != case_hash:
                 raise RuntimeError("Case changed during Experiment")
+            if attestation_refresh:
+                final_attestation = attestation_refresh()
+                stable_fields = ("pack_revision", "source_revision", "model_fingerprint")
+                if any(
+                    final_attestation.get(field) != runtime_attestation.get(field)
+                    for field in stable_fields
+                ):
+                    raise RuntimeError("runtime definition or model changed during Experiment")
             experiment["status"] = (
                 "completed"
                 if all(trial["assertions_passed"] for trial in experiment["trials"])

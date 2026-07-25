@@ -19,6 +19,8 @@ export HERMES_APP_API_KEY='use-a-long-random-secret'
   --gateway-port 19500
 ./app start --instance defense-demo
 ./app status --instance defense-demo
+./app attest --instance defense-demo
+./app cases --instance defense-demo
 ```
 
 Profiles 为 `defense-demo--host`、`--source`、`--architecture`、`--coach`，端口为 19500–19503。只将 19500 入口加入 ingress。

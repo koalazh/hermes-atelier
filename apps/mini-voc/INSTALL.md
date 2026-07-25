@@ -21,6 +21,8 @@ export HERMES_APP_API_KEY='use-a-long-random-secret'
   --gateway-port 19300
 ./app start --instance support-demo
 ./app status --instance support-demo
+./app attest --instance support-demo
+./app cases --instance support-demo
 ```
 
 物理 Profiles 为 `support-demo--dispatcher`、`support-demo--product` 和 `support-demo--transaction`，端口依次为 19300–19302。只将 19300 入口加入 ingress。
@@ -60,4 +62,4 @@ hermes -p support-demo--transaction gateway start
 
 ## 更新
 
-在新 release 目录中执行 `./app update --instance support-demo`。更新保留 `.env`、Memory、Sessions 和 `local/`，重启后运行首个 smoke Case；失败时 best-effort 恢复旧 release。保留旧 release 目录以支持回滚。
+在新 release 目录中执行 `./app update --instance support-demo`。更新保留 `.env`、Memory、Sessions 和 `local/`，重启后用独立 Case runner 执行首个 smoke Case 的 Trace、输出断言和 JSON output contract；失败时 best-effort 恢复旧 release。保留旧 release 目录以支持回滚。

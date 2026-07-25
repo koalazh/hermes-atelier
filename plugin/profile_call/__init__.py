@@ -225,9 +225,23 @@ class ProfileCaller:
     async def _emit_trace(
         client: httpx.AsyncClient, trace: dict[str, Any], event: dict[str, Any]
     ) -> bool:
+        emitted = True
+        file_name = str(trace.get("file") or "")
+        if file_name:
+            try:
+                path = Path(file_name).expanduser().resolve()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                line = (json.dumps(event, ensure_ascii=False) + "\n").encode()
+                descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+                try:
+                    os.write(descriptor, line)
+                finally:
+                    os.close(descriptor)
+            except OSError:
+                emitted = False
         url = str(trace.get("url") or "")
         if not url:
-            return True
+            return emitted
         headers: dict[str, str] = {}
         token_env = str(trace.get("token_env") or "")
         token = os.environ.get(token_env, "") if token_env else ""
@@ -236,7 +250,7 @@ class ProfileCaller:
         try:
             response = await client.post(url, headers=headers, json=event)
             response.raise_for_status()
-            return True
+            return emitted
         except (httpx.HTTPError, OSError):
             return False
 

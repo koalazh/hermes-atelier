@@ -9,7 +9,9 @@ import pytest
 from plugin.profile_call import ProfileCaller, ProfileCallError
 
 
-def write_runtime(path: Path, *, trace_url: str | None = None) -> None:
+def write_runtime(
+    path: Path, *, trace_url: str | None = None, trace_file: Path | None = None
+) -> None:
     payload = {
         "schema_version": 1,
         "instance": "support-dev",
@@ -30,6 +32,8 @@ def write_runtime(path: Path, *, trace_url: str | None = None) -> None:
     }
     if trace_url:
         payload["trace"] = {"url": trace_url}
+    if trace_file:
+        payload["trace"] = {"file": str(trace_file)}
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -145,3 +149,33 @@ async def test_profile_call_enforces_logical_allowed_calls(tmp_path: Path) -> No
 
     with pytest.raises(ProfileCallError, match="not allowed"):
         await caller.call({"target": "dispatcher", "task": "Loop"})
+
+
+@pytest.mark.asyncio
+async def test_profile_call_can_emit_pack_local_case_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / "local" / "app-runtime.json"
+    trace_file = tmp_path / "case-run.jsonl"
+    write_runtime(runtime, trace_file=trace_file)
+    monkeypatch.setenv("PROFILE_CALL_API_KEY", "runtime-only-key")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/runs"):
+            return httpx.Response(202, json={"run_id": "run-child"})
+        return httpx.Response(200, text='data: {"event":"run.completed","output":"ok"}\n\n')
+
+    result = await ProfileCaller(
+        runtime_path=runtime, transport=httpx.MockTransport(handler)
+    ).call(
+        {"target": "product", "task": "Work"},
+        source_session_id="pack_case_smoke_123",
+    )
+    traces = [json.loads(line) for line in trace_file.read_text(encoding="utf-8").splitlines()]
+
+    assert result["trace_degraded"] is False
+    assert [event["event"] for event in traces] == [
+        "profile_call.started",
+        "profile_call.completed",
+    ]
+    assert all(event["source_session_id"] == "pack_case_smoke_123" for event in traces)

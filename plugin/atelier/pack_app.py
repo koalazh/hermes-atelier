@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -9,6 +10,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -41,6 +43,55 @@ def _write_env(path: Path, updates: dict[str, str]) -> None:
     body.extend(f"{key}={values[key]}" for key in sorted(values))
     path.write_text("\n".join(body) + "\n", encoding="utf-8")
     path.chmod(0o600)
+
+
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _event_output(event: dict[str, Any]) -> str:
+    output = event.get("output")
+    if isinstance(output, str):
+        return output
+    response = event.get("response")
+    if isinstance(response, dict):
+        nested = response.get("output_text") or response.get("output")
+        if isinstance(nested, str):
+            return nested
+    return ""
+
+
+def _json_schema_errors(value: Any, schema: dict[str, Any], path: str = "$") -> list[str]:
+    errors: list[str] = []
+    expected = schema.get("type")
+    matches = {
+        "object": isinstance(value, dict),
+        "array": isinstance(value, list),
+        "string": isinstance(value, str),
+        "number": isinstance(value, (int, float)) and not isinstance(value, bool),
+        "integer": isinstance(value, int) and not isinstance(value, bool),
+        "boolean": isinstance(value, bool),
+        "null": value is None,
+    }
+    if isinstance(expected, str) and not matches.get(expected, False):
+        return [f"{path} must be {expected}"]
+    if isinstance(value, dict):
+        properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        for required in schema.get("required") or []:
+            if required not in value:
+                errors.append(f"{path}.{required} is required")
+        if schema.get("additionalProperties") is False:
+            for key in value:
+                if key not in properties:
+                    errors.append(f"{path}.{key} is not allowed")
+        for key, child in value.items():
+            child_schema = properties.get(key)
+            if isinstance(child_schema, dict):
+                errors.extend(_json_schema_errors(child, child_schema, f"{path}.{key}"))
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, child in enumerate(value):
+            errors.extend(_json_schema_errors(child, schema["items"], f"{path}[{index}]"))
+    return errors
 
 
 class PackRuntime:
@@ -203,6 +254,7 @@ class PackRuntime:
                 "schema_version": 1,
                 "pack_id": lock["pack_id"],
                 "pack_version": lock["pack_version"],
+                "pack_revision": lock["pack_revision"],
                 "instance": instance,
                 "current_agent": agent_id,
                 "agents": {
@@ -221,6 +273,17 @@ class PackRuntime:
                 json.dumps(mapping, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
             )
 
+        runtime_definition: dict[str, dict[str, str]] = {}
+        for agent_id, agent in lock["agents"].items():
+            profile_root = self.hermes_home / "profiles" / self._physical(instance, agent_id)
+            files: dict[str, str] = {}
+            for relative in agent["files"]:
+                path = profile_root / relative
+                if not path.is_file() or path.is_symlink():
+                    raise RuntimeError(f"installed Profile asset is missing: {agent_id}/{relative}")
+                files[relative] = _digest(path)
+            runtime_definition[agent_id] = files
+
         state = self._instance_state(instance)
         state.mkdir(parents=True, exist_ok=True)
         (state / "runtime.json").write_text(
@@ -233,6 +296,7 @@ class PackRuntime:
                     "model": model,
                     "model_base_url": model_base_url,
                     "model_key_env": model_key_env,
+                    "runtime_definition": runtime_definition,
                 },
                 indent=2,
                 ensure_ascii=False,
@@ -241,56 +305,367 @@ class PackRuntime:
             encoding="utf-8",
         )
 
-    def _smoke(
+    def _gateway_key(
         self,
         lock: dict[str, Any],
         *,
         instance: str,
         runtime: dict[str, Any],
-    ) -> None:
-        case = lock.get("smoke_case")
-        if not isinstance(case, dict) or not isinstance(case.get("input"), str):
-            return
+    ) -> str:
         key_env = str(runtime["gateway_key_env"])
         entry = str(lock["manifest"]["entry"])
         key = _env_values(
             self.hermes_home / "profiles" / self._physical(instance, entry) / ".env"
         ).get(key_env, "")
         if not key:
-            raise RuntimeError("smoke Case cannot resolve the Gateway API key")
-        request = urllib.request.Request(
-            f"{runtime['entry_base_url']}/v1/chat/completions",
-            data=json.dumps(
-                {
-                    "model": self._physical(instance, entry),
-                    "messages": [{"role": "user", "content": case["input"]}],
-                }
-            ).encode(),
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-                "X-Hermes-Session-Id": f"pack-update-smoke-{instance}",
-            },
-            method="POST",
-        )
+            raise RuntimeError("Case runner cannot resolve the Gateway API key")
+        return key
+
+    @staticmethod
+    def _wait_for_gateway(base_url: str, key: str) -> None:
         last_error: Exception | None = None
+        request = urllib.request.Request(
+            f"{base_url}/health",
+            headers={"Authorization": f"Bearer {key}"},
+        )
         for _ in range(15):
             try:
-                with urllib.request.urlopen(request, timeout=180) as response:
-                    payload = json.loads(response.read())
-                if payload.get("hermes", {}).get("failed") is True:
-                    raise RuntimeError(str(payload["hermes"].get("error") or "smoke failed"))
-                return
+                with urllib.request.urlopen(request, timeout=5):
+                    return
             except urllib.error.URLError as exc:
                 last_error = exc
                 time.sleep(1)
-        raise RuntimeError(f"smoke Case failed: {last_error}")
+        raise RuntimeError(f"entry Gateway is unavailable: {last_error}")
+
+    def _entry_run(
+        self,
+        *,
+        lock: dict[str, Any],
+        instance: str,
+        runtime: dict[str, Any],
+        case: dict[str, Any],
+        session_id: str,
+    ) -> tuple[str, str, str]:
+        key = self._gateway_key(lock, instance=instance, runtime=runtime)
+        base_url = str(runtime["entry_base_url"]).rstrip("/")
+        self._wait_for_gateway(base_url, key)
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+        if case.get("memory_policy") == "retained":
+            scope = str(case.get("memory_scope") or "")
+            if not scope:
+                raise RuntimeError("retained Case requires memory_scope")
+            headers["X-Hermes-Session-Key"] = scope
+        request = urllib.request.Request(
+            f"{base_url}/v1/runs",
+            data=json.dumps({"input": case["input"], "session_id": session_id}).encode(),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            created = json.loads(response.read())
+        run_id = str(created.get("run_id") or "")
+        if not run_id:
+            raise RuntimeError("Hermes did not return a Run ID")
+
+        output_parts: list[str] = []
+        terminal: dict[str, Any] | None = None
+        events = urllib.request.Request(
+            f"{base_url}/v1/runs/{run_id}/events",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        with urllib.request.urlopen(events, timeout=900) as response:
+            for raw_line in response:
+                line = raw_line.decode(errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                raw = line.removeprefix("data:").strip()
+                if not raw:
+                    continue
+                event = json.loads(raw)
+                if event.get("event") == "message.delta" and isinstance(
+                    event.get("delta"), str
+                ):
+                    output_parts.append(event["delta"])
+                if str(event.get("event") or "").startswith("run."):
+                    terminal = event
+        if terminal is None:
+            status_request = urllib.request.Request(
+                f"{base_url}/v1/runs/{run_id}",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            with urllib.request.urlopen(status_request, timeout=30) as response:
+                terminal = json.loads(response.read())
+        status = str(terminal.get("status") or terminal.get("event", "")).removeprefix("run.")
+        output = "".join(output_parts) or _event_output(terminal)
+        return run_id, status, output
+
+    def _case_trace_paths(self, lock: dict[str, Any], instance: str) -> dict[Path, bytes]:
+        backups: dict[Path, bytes] = {}
+        for agent_id in lock["agents"]:
+            path = (
+                self.hermes_home
+                / "profiles"
+                / self._physical(instance, agent_id)
+                / "local"
+                / "app-runtime.json"
+            )
+            if not path.is_file():
+                raise RuntimeError(f"runtime mapping is missing for {agent_id}")
+            backups[path] = path.read_bytes()
+        return backups
+
+    @staticmethod
+    def _restore_trace_paths(backups: dict[Path, bytes]) -> None:
+        for path, content in backups.items():
+            path.write_bytes(content)
+
+    @staticmethod
+    def _read_traces(path: Path, session_id: str) -> list[dict[str, Any]]:
+        if not path.is_file():
+            return []
+        traces = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            value = json.loads(line)
+            if isinstance(value, dict) and value.get("source_session_id") == session_id:
+                traces.append(value)
+        return traces
+
+    @staticmethod
+    def _assertions(
+        case: dict[str, Any], *, output: str, traces: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        assertions = case.get("assertions") if isinstance(case.get("assertions"), dict) else {}
+        calls = assertions.get("calls") if isinstance(assertions.get("calls"), dict) else {}
+        output_rules = (
+            assertions.get("output") if isinstance(assertions.get("output"), dict) else {}
+        )
+        completed = {
+            str(event.get("target"))
+            for event in traces
+            if event.get("event") == "profile_call.completed"
+        }
+        attempted = {str(event.get("target")) for event in traces}
+        results = [
+            {"kind": "calls.required", "value": target, "passed": target in completed}
+            for target in calls.get("required") or []
+        ]
+        results.extend(
+            {"kind": "calls.forbidden", "value": target, "passed": target not in attempted}
+            for target in calls.get("forbidden") or []
+        )
+        folded = output.casefold()
+        results.extend(
+            {
+                "kind": "output.must_contain",
+                "value": value,
+                "passed": str(value).casefold() in folded,
+            }
+            for value in output_rules.get("must_contain") or []
+        )
+        results.extend(
+            {
+                "kind": "output.must_not_claim",
+                "value": value,
+                "passed": str(value).casefold() not in folded,
+            }
+            for value in output_rules.get("must_not_claim") or []
+        )
+        return results
+
+    def _contract_assertion(self, lock: dict[str, Any], output: str) -> dict[str, Any] | None:
+        relative = lock["manifest"].get("public_api", {}).get("output_contract")
+        if not relative:
+            return None
+        contract_path = self.pack_root / str(relative)
+        try:
+            value = json.loads(output)
+            schema = _load_json(contract_path)
+            errors = _json_schema_errors(value, schema)
+        except (json.JSONDecodeError, OSError, RuntimeError) as exc:
+            errors = [str(exc)]
+        return {
+            "kind": "contract.output",
+            "value": str(relative),
+            "passed": not errors,
+            "errors": errors[:20],
+        }
+
+    def _run_case(
+        self,
+        lock: dict[str, Any],
+        *,
+        instance: str,
+        runtime: dict[str, Any],
+        case: dict[str, Any],
+    ) -> dict[str, Any]:
+        relative = str(case.get("path") or "")
+        case_path = self.pack_root / relative
+        if not case_path.is_file() or _digest(case_path) != case.get("hash"):
+            raise RuntimeError(f"Case does not match app.lock: {relative}")
+        run_nonce = uuid.uuid4().hex
+        session_id = f"pack_case_{str(case.get('id') or 'case')}_{run_nonce}"
+        trace_path = self._instance_state(instance) / "case-runs" / f"{run_nonce}.jsonl"
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        backups = self._case_trace_paths(lock, instance)
+        try:
+            for path in backups:
+                mapping = _load_json(path)
+                mapping["trace"] = {"file": str(trace_path)}
+                path.write_text(
+                    json.dumps(mapping, indent=2, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+            run_id, status, output = self._entry_run(
+                lock=lock,
+                instance=instance,
+                runtime=runtime,
+                case=case,
+                session_id=session_id,
+            )
+            traces = self._read_traces(trace_path, session_id)
+        finally:
+            self._restore_trace_paths(backups)
+            trace_path.unlink(missing_ok=True)
+        assertions = self._assertions(case, output=output, traces=traces)
+        contract = self._contract_assertion(lock, output)
+        if contract:
+            assertions.append(contract)
+        return {
+            "id": case.get("id"),
+            "session_id": session_id,
+            "hermes_run_id": run_id,
+            "status": status,
+            "output": output,
+            "traces": traces,
+            "assertions": assertions,
+            "passed": status == "completed" and all(item["passed"] for item in assertions),
+        }
+
+    def run_cases(self, *, instance: str, case_id: str | None = None) -> dict[str, Any]:
+        lock = self._installed_lock(instance)
+        install = _load_json(self._instance_state(instance) / "install.json")
+        installed_pack = Path(str(install.get("pack_path") or "")).resolve()
+        if installed_pack != self.pack_root:
+            raise RuntimeError("run Cases with the wrapper from the installed App Pack")
+        runtime = _load_json(self._instance_state(instance) / "runtime.json")
+        cases = [
+            case
+            for case in lock.get("cases") or []
+            if not case_id or case.get("id") == case_id
+        ]
+        if not cases:
+            raise RuntimeError(f"unknown or missing Case: {case_id or '<all>'}")
+        results = [
+            self._run_case(lock, instance=instance, runtime=runtime, case=case) for case in cases
+        ]
+        return {
+            "instance": instance,
+            "passed": all(item["passed"] for item in results),
+            "cases": results,
+        }
+
+    def _smoke(
+        self,
+        lock: dict[str, Any],
+        *,
+        instance: str,
+        runtime: dict[str, Any],
+        pack_root: Path,
+    ) -> None:
+        cases = lock.get("cases") or []
+        if not cases:
+            return
+        original_root = self.pack_root
+        try:
+            self.pack_root = pack_root.resolve()
+            result = self._run_case(
+                lock,
+                instance=instance,
+                runtime=runtime,
+                case=cases[0],
+            )
+        finally:
+            self.pack_root = original_root
+        if not result["passed"]:
+            raise RuntimeError(f"smoke Case failed: {result['id']}")
 
     def _installed_lock(self, instance: str) -> dict[str, Any]:
         path = self._instance_state(instance) / "app.lock"
         if not path.is_file():
             raise RuntimeError(f"App Pack instance is not installed: {instance}")
         return _load_json(path)
+
+    def attest(self, *, instance: str) -> dict[str, Any]:
+        lock = self._installed_lock(instance)
+        state = self._instance_state(instance)
+        install = _load_json(state / "install.json")
+        runtime = _load_json(state / "runtime.json")
+        installed_pack = Path(str(install.get("pack_path") or "")).resolve()
+        if installed_pack != self.pack_root:
+            raise RuntimeError("attestation wrapper does not match the installed App Pack")
+
+        digest = hashlib.sha256()
+        for relative, expected in sorted(lock.get("files", {}).items()):
+            path = (self.pack_root / relative).resolve()
+            try:
+                path.relative_to(self.pack_root)
+            except ValueError as exc:
+                raise RuntimeError(f"release asset escapes App Pack: {relative}") from exc
+            if path.is_symlink() or not path.is_file() or _digest(path) != expected:
+                raise RuntimeError(f"release asset does not match app.lock: {relative}")
+            digest.update(relative.encode() + b"\0" + expected.encode())
+        if digest.hexdigest() != lock.get("pack_revision"):
+            raise RuntimeError("app.lock Pack revision is inconsistent")
+
+        recorded_definition = runtime.get("runtime_definition")
+        if not isinstance(recorded_definition, dict):
+            raise RuntimeError("runtime definition attestation is missing")
+        if set(recorded_definition) != set(lock["agents"]):
+            raise RuntimeError("runtime definition does not cover every logical Agent")
+        for agent_id, expected_files in recorded_definition.items():
+            if agent_id not in lock["agents"] or not isinstance(expected_files, dict):
+                raise RuntimeError("runtime definition attestation is invalid")
+            profile_root = self.hermes_home / "profiles" / self._physical(instance, agent_id)
+            for relative, expected in expected_files.items():
+                path = (profile_root / relative).resolve()
+                try:
+                    path.relative_to(profile_root.resolve())
+                except ValueError as exc:
+                    raise RuntimeError(
+                        f"installed Profile asset escapes root: {agent_id}/{relative}"
+                    ) from exc
+                if path.is_symlink() or not path.is_file() or _digest(path) != expected:
+                    raise RuntimeError(
+                        f"installed Profile asset changed: {agent_id}/{relative}"
+                    )
+            mapping = _load_json(profile_root / "local" / "app-runtime.json")
+            if (
+                mapping.get("pack_revision") != lock["pack_revision"]
+                or mapping.get("current_agent") != agent_id
+            ):
+                raise RuntimeError(f"runtime mapping does not match app.lock: {agent_id}")
+
+        return {
+            "verified": True,
+            "instance": instance,
+            "pack_id": lock["pack_id"],
+            "pack_version": lock["pack_version"],
+            "pack_revision": lock["pack_revision"],
+            "source_revision": lock["source_revision"],
+            "source_provenance": lock["source_provenance"],
+            "definition_snapshot": lock["definition_snapshot"],
+            "cases": lock.get("cases") or [],
+            "model_fingerprint": {
+                "provider": "custom:app_pack",
+                "model": runtime["model"],
+                "base_url": runtime["model_base_url"],
+            },
+            "entry_base_url": runtime["entry_base_url"],
+            "gateway_key_env": runtime["gateway_key_env"],
+        }
 
     def _resolve_instance(self, instance: str | None) -> str:
         if instance:
@@ -367,7 +742,12 @@ class PackRuntime:
                 self.gateway("start", instance=instance)
                 if runtime:
                     refreshed = _load_json(runtime_path)
-                    self._smoke(self.lock, instance=instance, runtime=refreshed)
+                    self._smoke(
+                        self.lock,
+                        instance=instance,
+                        runtime=refreshed,
+                        pack_root=self.pack_root,
+                    )
         except Exception as exc:
             rollback_errors: list[str] = []
             try:
@@ -405,7 +785,12 @@ class PackRuntime:
                     self.gateway("start", instance=instance)
                     if runtime:
                         restored = _load_json(runtime_path)
-                        self._smoke(old_lock, instance=instance, runtime=restored)
+                        self._smoke(
+                            old_lock,
+                            instance=instance,
+                            runtime=restored,
+                            pack_root=old_pack,
+                        )
             except Exception as rollback_exc:
                 rollback_errors.append(str(rollback_exc))
             detail = f"Pack update failed: {exc}"
@@ -440,6 +825,11 @@ def _parser() -> argparse.ArgumentParser:
     update = commands.add_parser("update")
     update.add_argument("--instance", required=True)
     update.add_argument("--no-restart", action="store_true")
+    cases = commands.add_parser("cases")
+    cases.add_argument("--instance", required=True)
+    cases.add_argument("--case")
+    attest = commands.add_parser("attest")
+    attest.add_argument("--instance", required=True)
     return parser
 
 
@@ -465,6 +855,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "update":
         runtime.update(instance=args.instance, restart=not args.no_restart)
+    elif args.command == "cases":
+        result = runtime.run_cases(instance=args.instance, case_id=args.case)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return 0 if result["passed"] else 1
+    elif args.command == "attest":
+        print(json.dumps(runtime.attest(instance=args.instance), indent=2, ensure_ascii=False))
     else:
         runtime.gateway(
             args.command,

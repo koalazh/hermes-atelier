@@ -25,7 +25,7 @@ my-app/
 └── .env.example
 ```
 
-`atelier release` 另外生成可执行的 `app` 和不可变的 `app.lock`。`app.lock` 固化 Profile 文件摘要、Pack revision、Manifest 和首个可用 smoke Case 输入，不包含 Secret。
+`atelier release` 另外生成可执行的 `app` 和不可变的 `app.lock`。`app.lock` 固化所有交付文件、Profile、Case、Contract 的摘要，source/release revision、Manifest、完整 Cases 和可验证 source provenance，不包含 Secret。
 
 ## Manifest
 
@@ -83,7 +83,9 @@ Pack 永远只引用 `host`、`expert` 之类的逻辑 ID。安装时 Consumer �
 
 ## 发布过滤
 
-Release 递归排除 `.env`、`local/`、Memory、Sessions、Logs、Trace、PID、Atelier 数据和旧 `app.lock`。定义快照只哈希可发布文件。若使用 `profile_call`，Release 只把该 Plugin 注入有出边的调用方 Distribution。
+Release 递归排除 `.env` 及私有变体、`MEMORY.md`、`USER.md`、`local/`、Sessions、Logs、Trace、PID、bytecode、Atelier 数据和旧 `app.lock`，保留只有占位符的 `.env.example`。Pack 禁止 symlink；发布物再次扫描私钥和 API Key 形状。Definition Snapshot 哈希注入 Plugin 和生成 wrapper 后的每个交付文件。若使用 `profile_call`，Release 只把该 Plugin 注入有出边的调用方 Distribution。
+
+Git checkout 中的 Pack 必须先提交；Release 将 commit/tag 解析为完整 commit，并拒绝 Pack 路径的 tracked/untracked 漂移。非 Git 目录使用完整 source content SHA-256 provenance，不能写任意 revision 字符串。
 
 ## 验证
 
@@ -93,4 +95,4 @@ uv run atelier cases apps/mini-voc
 uv run atelier release apps/mini-voc /tmp/mini-voc-release --git-revision HEAD
 ```
 
-Validator 验证结构和边界，不证明 SOUL 质量、模型行为或生产可用性。真实行为需要 fresh `HERMES_HOME` 安装和 Case/Experiment 证据。
+Validator 验证结构和边界，不证明 SOUL 质量、模型行为或生产可用性。Release 安装后使用 `./app attest --instance <id>` 校验实际文件/模型/入口，使用 `./app cases --instance <id>` 在独立 Session 中执行全部 Cases。真实模型结果仍需人工审阅。

@@ -38,16 +38,18 @@ human_review: 应拒绝无测量支持的数字，并给出有源码证据的更
 
 ## Experiment 冻结内容
 
+Experiment 不接受调用方自报的 endpoint 或模型指纹。启动前，Atelier 对已安装 runtime instance 执行 attestation：校验 release 全文件 hash、实际安装的 Profile 文件、每个运行映射中的 Pack revision，以及 configure 时冻结的模型/Provider/URL。只有 attested source revision 和 Case hash 与当前所选 Pack 一致才运行。
+
 启动时 Experiment 保存：
 
 - Pack ID、版本与定义 revision；
 - 每个 Profile Distribution 可发布文件的 Definition Snapshot；
-- 调用方提供并经脱敏的模型/Provider 指纹；
+- runtime attestation 得到的模型/Provider 指纹与 release Definition Snapshot；
 - Case 内容、文件 hash 与 Memory Policy；
 - 可选候选 Git metadata；
 - 1 到 20 个 Trial。
 
-每个 Trial 创建唯一 Hermes Session 和真实 Run，保存终态、脱敏输出、匹配该 Session 的 Trace 与断言结果。运行结束前重新校验 Case hash；中途变化会使 Experiment 失败，而不是把两个条件混成一条记录。
+每个 Trial 创建唯一 Hermes Session 和真实 Run，保存终态、脱敏输出、匹配该 Session 的 Trace 与断言结果。运行结束前重新执行 runtime attestation 并校验 Case hash；定义、模型或 Case 中途变化会使 Experiment 失败，而不是把两个条件混成一条记录。
 
 状态为：
 
@@ -70,4 +72,4 @@ Reviewer 不能：
 
 ## 候选改动
 
-Draft 只生成候选目录。候选采用时应进入显式 Git branch/worktree，展示 Diff，重新运行相同或明确版本化的 Cases，并由开发者决定是否合并。Atelier 不对当前工作树做隐式 `git apply`。
+Draft 只生成候选目录。候选采用时应进入显式 Git branch/worktree，展示 Diff，重新运行相同或明确版本化的 Cases，并由开发者决定是否合并。候选 Experiment 必须同时声明 baseline Pack revision 和 baseline Case hash；Case hash 变化会被拒绝，并要求作为新的评价条件单独运行，不能和 Profile 变化合并成“改进”。Atelier 不对当前工作树做隐式 `git apply`。

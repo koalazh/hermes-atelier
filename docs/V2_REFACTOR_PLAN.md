@@ -280,9 +280,9 @@ Atelier 只展示 Candidate branch/worktree、Diff 与 Experiment 比较。创�
 
 V2 的目标不是把七阶段 V1 流程做得更完整，而是让以下所有权在源码和运行证据中同时成立：
 
-> Design through conversation.  
-> Run through Hermes.  
-> Observe through Atelier.  
-> Evaluate through cases.  
-> Change through Git.  
+> Design through conversation.
+> Run through Hermes.
+> Observe through Atelier.
+> Evaluate through cases.
+> Change through Git.
 > Deliver through App Packs.

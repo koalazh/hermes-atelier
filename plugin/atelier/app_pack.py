@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Literal
 
@@ -29,6 +30,9 @@ RUNTIME_NAMES = {
     ".DS_Store",
     ".env",
     "__pycache__",
+    "MEMORY.md",
+    "USER.md",
+    "app.lock",
     "auth.json",
     "local",
     "memories",
@@ -41,6 +45,10 @@ RUNTIME_NAMES = {
     "gateway_state.json",
     "processes.json",
 }
+SECRET_PATTERNS = (
+    re.compile(rb"sk-[A-Za-z0-9_-]{20,}"),
+    re.compile(rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
+)
 
 
 class AgentDefinition(BaseModel):
@@ -158,6 +166,11 @@ class AppPack:
     @classmethod
     def load(cls, root: Path) -> AppPack:
         root = root.resolve()
+        symlinks = [path for path in root.rglob("*") if path.is_symlink()]
+        if symlinks:
+            raise ValueError(
+                f"App Pack symlinks are forbidden: {symlinks[0].relative_to(root)}"
+            )
         manifest_path = root / "app.yaml"
         raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
@@ -222,37 +235,139 @@ def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _is_runtime_name(name: str) -> bool:
+    return (
+        name in RUNTIME_NAMES
+        or (name.startswith(".env") and name != ".env.example")
+        or name.endswith((".pyc", ".pyo"))
+    )
+
+
 def build_definition_snapshot(pack: AppPack) -> dict[str, Any]:
-    agents: dict[str, Any] = {}
     digest = hashlib.sha256()
-    manifest_bytes = (pack.root / "app.yaml").read_bytes()
-    digest.update(b"app.yaml\0" + manifest_bytes)
+    all_files: dict[str, str] = {}
+    for path in sorted(item for item in pack.root.rglob("*") if item.is_file()):
+        relative_path = path.relative_to(pack.root)
+        if any(_is_runtime_name(part) for part in relative_path.parts):
+            continue
+        relative = relative_path.as_posix()
+        value = _file_digest(path)
+        all_files[relative] = value
+        digest.update(relative.encode() + b"\0" + value.encode())
+
+    agents: dict[str, Any] = {}
     for agent_id, definition in sorted(pack.manifest.agents.items()):
-        root = pack.root / definition.distribution
-        files: dict[str, str] = {}
-        for path in sorted(item for item in root.rglob("*") if item.is_file()):
-            relative = path.relative_to(root).as_posix()
-            if any(part in RUNTIME_NAMES for part in path.relative_to(root).parts):
-                continue
-            value = _file_digest(path)
-            files[relative] = value
-            digest.update(agent_id.encode() + b"\0" + relative.encode() + b"\0" + value.encode())
+        prefix = f"{definition.distribution.rstrip('/')}/"
+        files = {
+            relative.removeprefix(prefix): value
+            for relative, value in all_files.items()
+            if relative.startswith(prefix)
+        }
         agents[agent_id] = {"distribution": definition.distribution, "files": files}
+    resources: dict[str, dict[str, str]] = {"cases": {}, "contracts": {}}
+    for kind, relatives in (
+        ("cases", pack.manifest.cases),
+        ("contracts", pack.manifest.contracts),
+    ):
+        for relative in sorted(relatives):
+            resources[kind][relative] = all_files[relative]
     return {
         "schema_version": 1,
         "pack_id": pack.manifest.id,
         "pack_version": pack.manifest.version,
         "revision": digest.hexdigest(),
+        "files": all_files,
         "agents": agents,
+        **resources,
     }
 
 
 def _ignore_runtime(_: str, names: list[str]) -> set[str]:
-    return {
-        name
-        for name in names
-        if name in RUNTIME_NAMES or name == "app.lock" or name.endswith((".pyc", ".pyo"))
-    }
+    return {name for name in names if _is_runtime_name(name) or name == "app.lock"}
+
+
+def _source_provenance(
+    pack_root: Path,
+    supplied: str | None,
+    *,
+    source_revision: str,
+) -> dict[str, str]:
+    value = str(supplied or "").strip()
+    if len(value) > 200 or any(character in value for character in "\r\n"):
+        raise ValueError("git revision must be a single line of at most 200 characters")
+    top_level = subprocess.run(
+        ["git", "-C", str(pack_root), "rev-parse", "--show-toplevel"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if top_level.returncode != 0:
+        if value and value != f"content-sha256:{source_revision}":
+            raise ValueError("non-Git provenance must equal the App Pack content revision")
+        return {"kind": "content_sha256", "revision": source_revision}
+
+    requested = value or "HEAD"
+    resolved = subprocess.run(
+        ["git", "-C", str(pack_root), "rev-parse", "--verify", f"{requested}^{{commit}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if resolved.returncode != 0 or not resolved.stdout.strip():
+        raise ValueError("git revision must resolve to a commit or tag")
+    repository = Path(top_level.stdout.strip()).resolve()
+    release_inputs = [
+        pack_root.resolve(),
+        Path(__file__).with_name("pack_app.py").resolve(),
+        Path(__file__).resolve().parents[1].joinpath("profile_call").resolve(),
+    ]
+    relative_inputs = []
+    for path in release_inputs:
+        try:
+            relative_inputs.append(str(path.relative_to(repository)))
+        except ValueError:
+            continue
+    status = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            *relative_inputs,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if status.returncode != 0 or status.stdout.strip():
+        raise ValueError("App Pack and release inputs must be committed before release")
+    revision_diff = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "diff",
+            "--quiet",
+            resolved.stdout.strip(),
+            "--",
+            *relative_inputs,
+        ],
+        check=False,
+    )
+    if revision_diff.returncode != 0:
+        raise ValueError("App Pack and release inputs do not match the selected Git revision")
+    return {"kind": "git", "revision": resolved.stdout.strip()}
+
+
+def _validate_release_contents(root: Path) -> None:
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        relative = path.relative_to(root)
+        content = path.read_bytes()
+        if any(pattern.search(content) for pattern in SECRET_PATTERNS):
+            raise ValueError(f"release asset contains a forbidden secret shape: {relative}")
 
 
 def release_pack(
@@ -264,6 +379,12 @@ def release_pack(
     destination = destination.resolve()
     if destination.exists():
         raise ValueError(f"release destination already exists: {destination}")
+    source_snapshot = build_definition_snapshot(pack)
+    provenance = _source_provenance(
+        pack.root,
+        git_revision,
+        source_revision=source_snapshot["revision"],
+    )
     shutil.copytree(pack.root, destination, ignore=_ignore_runtime)
     if "profile_call" in pack.manifest.collaboration:
         plugin_source = Path(__file__).resolve().parents[1] / "profile_call"
@@ -300,25 +421,31 @@ def release_pack(
     shutil.copy2(runner_source, destination / "app")
     (destination / "app").chmod(0o755)
     released = AppPack.load(destination)
+    _validate_release_contents(destination)
     snapshot = build_definition_snapshot(released)
+    cases = []
+    for relative in released.manifest.cases:
+        value = yaml.safe_load((destination / relative).read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or not isinstance(value.get("input"), str):
+            raise ValueError(f"invalid release Case: {relative}")
+        cases.append({"path": relative, "hash": snapshot["cases"][relative], **value})
     lock = {
         "schema_version": 1,
         "pack_id": released.manifest.id,
         "pack_version": released.manifest.version,
         "pack_revision": snapshot["revision"],
-        "git_revision": git_revision,
+        "source_revision": source_snapshot["revision"],
+        "source_provenance": provenance,
+        "git_revision": provenance["revision"] if provenance["kind"] == "git" else None,
+        "definition_snapshot": snapshot,
+        "files": snapshot["files"],
         "agents": snapshot["agents"],
+        "cases": cases,
+        "contracts": snapshot["contracts"],
         "manifest": released.manifest.model_dump(mode="json"),
     }
-    if released.manifest.cases:
-        smoke = yaml.safe_load(
-            (destination / released.manifest.cases[0]).read_text(encoding="utf-8")
-        )
-        if isinstance(smoke, dict) and isinstance(smoke.get("input"), str):
-            lock["smoke_case"] = {
-                "id": str(smoke.get("id") or Path(released.manifest.cases[0]).stem),
-                "input": smoke["input"],
-            }
+    if cases:
+        lock["smoke_case"] = {"id": cases[0].get("id"), "input": cases[0]["input"]}
     (destination / "app.lock").write_text(
         json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )

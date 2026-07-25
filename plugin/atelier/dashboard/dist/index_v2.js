@@ -97,9 +97,9 @@
     var casesState = useState([]);
     var cases = casesState[0];
     var setCases = casesState[1];
-    var endpointState = useState("");
-    var endpoint = endpointState[0];
-    var setEndpoint = endpointState[1];
+    var instanceState = useState("");
+    var instance = instanceState[0];
+    var setInstance = instanceState[1];
     var experimentState = useState(null);
     var experiment = experimentState[0];
     var setExperiment = experimentState[1];
@@ -110,14 +110,14 @@
     useEffect(function () { if (packId) json("/packs/" + packId + "/cases").then(function (value) { setCases(value.items || []); setCaseId(value.items && value.items[0] ? value.items[0].id : ""); }); }, [packId]);
     function run() {
       setError("");
-      post("/experiments", { pack_id: packId, case_id: caseId, entry_base_url: endpoint, api_key_env: "HERMES_APP_API_KEY", model_fingerprint: { source: "operator-declared" }, trial_count: 1 })
+      post("/experiments", { pack_id: packId, case_id: caseId, runtime_instance: instance, trial_count: 1 })
         .then(function (value) { setExperiment(value); props.reload(); }).catch(function (value) { setError(value.message); });
     }
     return h("div", { className: "atelier-grid review-grid" },
       h("section", { className: "atelier-card" }, h("div", { className: "eyebrow" }, "CASE → EXPERIMENT"), h("h2", null, "Run frozen evidence"),
         h("label", null, "App Pack"), h("select", { className: "atelier-input", value: packId, onChange: function (event) { setPackId(event.target.value); } }, props.packs.map(function (pack) { return h("option", { key: pack.id, value: pack.id }, pack.id + " @ " + pack.revision.slice(0, 8)); })),
         h("label", null, "Case"), h("select", { className: "atelier-input", value: caseId, onChange: function (event) { setCaseId(event.target.value); } }, cases.map(function (item) { return h("option", { key: item.id, value: item.id }, item.id + " / " + item.memory_policy); })),
-        h("label", null, "Entry Hermes base URL"), h("input", { className: "atelier-input", value: endpoint, onChange: function (event) { setEndpoint(event.target.value); }, placeholder: "http://127.0.0.1:8080" }), h("p", { className: "muted" }, "The API key is read from HERMES_APP_API_KEY; secrets are never sent in this form."), h(Button, { kind: "primary", disabled: !packId || !caseId || !endpoint, onClick: run }, "Run Experiment"), h(ErrorBox, { error: error })),
+        h("label", null, "Installed runtime instance"), h("input", { className: "atelier-input", value: instance, onChange: function (event) { setInstance(event.target.value); }, placeholder: "customer-a" }), h("p", { className: "muted" }, "Atelier attests the installed app.lock, Profile assets, model, and entry endpoint before running."), h(Button, { kind: "primary", disabled: !packId || !caseId || !instance, onClick: run }, "Run Experiment"), h(ErrorBox, { error: error })),
       h("section", { className: "atelier-card" }, h("div", { className: "row spread" }, h("div", null, h("div", { className: "eyebrow" }, "DEFINITION + MODEL + MEMORY"), h("h2", null, "Experiment evidence")), experiment ? h(Badge, { value: experiment.status }) : null), experiment ? h("pre", { className: "atelier-document" }, JSON.stringify(experiment, null, 2)) : h(Empty, null, "Trials, real Runs, calls, assertions, and human feedback appear here."))
     );
   }

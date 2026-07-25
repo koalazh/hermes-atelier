@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from .redaction import redact
+
+IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$")
 
 
 def _now() -> str:
@@ -25,6 +28,13 @@ class StudioStore:
         directory = self.root / kind
         directory.mkdir(parents=True, exist_ok=True)
         return directory
+
+    @staticmethod
+    def _identifier(value: object, kind: str) -> str:
+        identifier = str(value or "").strip()
+        if not IDENTIFIER_RE.fullmatch(identifier):
+            raise ValueError(f"invalid {kind} identifier")
+        return identifier
 
     @staticmethod
     def _write_json(path: Path, value: dict[str, Any]) -> None:
@@ -65,10 +75,12 @@ class StudioStore:
 
     def save_design(self, design: dict[str, Any]) -> None:
         design = {**design, "updated_at": _now()}
+        design_id = self._identifier(design.get("id"), "Design")
         with self._lock:
-            self._write_json(self._directory("designs") / str(design["id"]) / "design.json", design)
+            self._write_json(self._directory("designs") / design_id / "design.json", design)
 
     def get_design(self, design_id: str) -> dict[str, Any]:
+        design_id = self._identifier(design_id, "Design")
         path = self._directory("designs") / design_id / "design.json"
         if not path.is_file():
             raise KeyError(f"unknown Design: {design_id}")
@@ -81,7 +93,7 @@ class StudioStore:
         return sorted(designs, key=lambda item: item["updated_at"], reverse=True)
 
     def append_trace(self, event: dict[str, Any]) -> dict[str, Any]:
-        source_session_id = str(event.get("source_session_id") or "").strip()
+        source_session_id = self._identifier(event.get("source_session_id"), "Session")
         call_id = str(event.get("call_id") or "").strip()
         event_type = str(event.get("event") or "").strip()
         if (
@@ -102,6 +114,7 @@ class StudioStore:
         return stored
 
     def traces(self, source_session_id: str) -> list[dict[str, Any]]:
+        source_session_id = self._identifier(source_session_id, "Session")
         path = self._directory("traces") / f"{source_session_id}.jsonl"
         if not path.is_file():
             return []
@@ -113,13 +126,15 @@ class StudioStore:
         return result
 
     def save_experiment(self, experiment: dict[str, Any]) -> None:
+        experiment_id = self._identifier(experiment.get("id"), "Experiment")
         with self._lock:
             self._write_json(
-                self._directory("experiments") / f"{experiment['id']}.json",
+                self._directory("experiments") / f"{experiment_id}.json",
                 experiment,
             )
 
     def get_experiment(self, experiment_id: str) -> dict[str, Any]:
+        experiment_id = self._identifier(experiment_id, "Experiment")
         path = self._directory("experiments") / f"{experiment_id}.json"
         if not path.is_file():
             raise KeyError(f"unknown Experiment: {experiment_id}")

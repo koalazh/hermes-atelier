@@ -8,7 +8,7 @@ uv run atelier cases apps/mini-voc
 uv run atelier release apps/mini-voc /absolute/release/mini-voc --git-revision HEAD
 ```
 
-目标目录必须不存在。Release 复制可发布资产、按调用方注入独立 `profile_call`、生成可执行薄 wrapper `app` 和 `app.lock`。接收方不需要安装 Atelier。
+目标目录必须不存在，Git Pack 必须已提交且与所选 commit/tag 一致。Release 复制可发布资产、按调用方注入独立 `profile_call`、生成可执行薄 wrapper `app` 和 `app.lock`，并在变换后哈希所有交付文件。接收方不需要安装 Atelier。
 
 发布物可签名、压缩或提交到 Consumer 自己的 Git/制品系统；Atelier V2 不提供 Registry 或远程发布服务。
 
@@ -30,11 +30,13 @@ export HERMES_APP_API_KEY='use-a-long-random-secret'
   --gateway-port 19300
 ./app start --instance support-demo
 ./app status --instance support-demo
+./app attest --instance support-demo
+./app cases --instance support-demo
 ```
 
 `configure` 会把 Consumer 当前进程中的两个 Secret 写入每个 Profile 自己的 `.env`，权限设为 `0600`。命令行只传环境变量名，避免 Secret 进入 shell history。
 
-端口从 `--gateway-port` 起按 `app.lock` Agent 顺序连续分配。只将唯一入口 Profile 端口加入 ingress；其他端口保持 loopback 和 API Key 认证。
+唯一入口使用 `--gateway-port`，其余 Agent 再连续分配。只将唯一入口 Profile 端口加入 ingress；其他端口保持 loopback 和 API Key 认证。
 
 ## 原生 Hermes 等价命令
 
@@ -75,7 +77,7 @@ cd /absolute/new-release
 2. 停止旧 Profile Gateways；
 3. 安装/更新新 Distributions，删除新版本不再声明的物理 Profiles；
 4. 重建逻辑映射并保留模型、端口和 Secret 环境变量配置；
-5. 启动新 Gateways，以 `app.lock` 中首个 smoke Case 调用公开入口；
+5. 启动新 Gateways，以 `app.lock` 中首个 smoke Case 创建唯一 clean Session/Run，收集 Pack-local 临时 Trace，执行调用/输出断言和已声明的输出 Contract；
 6. 成功后保存新安装状态。
 
 失败时 wrapper 会停止新 Gateways，best-effort 重新安装旧 release、恢复旧 `app.lock`、映射和配置、重启旧服务并运行旧 smoke。外部进程、网络、模型和 Hermes 命令可能使回滚本身失败，因此该机制不宣称事务原子性；错误必须交给 Consumer 处理。
@@ -92,4 +94,4 @@ cd /absolute/new-release
 
 ## 发布门禁
 
-发布前至少完成 Pack validate、Case parse、确定性测试、Ruff、build、Secret 扫描和 fresh `HERMES_HOME` smoke。真实模型 smoke 只证明链路，不证明生产质量或性能。
+发布前至少完成 Pack validate、Case parse、确定性测试、Ruff、build、Secret 扫描和 fresh `HERMES_HOME` 的 `attest`/`cases`。Case runner 独立于 Studio，执行后恢复运行映射并删除临时 Trace。真实模型 Case 只证明该次链路与断言，不证明生产质量或性能。

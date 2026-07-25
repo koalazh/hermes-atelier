@@ -9,10 +9,31 @@ from typing import Any
 
 import pytest
 
+from plugin.atelier.app_pack import AppPack, build_definition_snapshot
 from plugin.atelier.designs import DesignService
 from plugin.atelier.evaluation import ExperimentService, load_case
 from plugin.atelier.studio_store import StudioStore
 from tests.test_app_pack_v2 import create_pack
+
+
+def runtime_attestation(pack_root: Path, case_path: Path) -> dict[str, Any]:
+    snapshot = build_definition_snapshot(AppPack.load(pack_root))
+    case, case_hash = load_case(case_path)
+    return {
+        "verified": True,
+        "pack_id": "support",
+        "pack_version": "2.0.0",
+        "pack_revision": snapshot["revision"],
+        "source_revision": snapshot["revision"],
+        "source_provenance": {
+            "kind": "content_sha256",
+            "revision": snapshot["revision"],
+        },
+        "definition_snapshot": snapshot,
+        "cases": [{"id": case.id, "hash": case_hash}],
+        "model_fingerprint": {"provider": "custom", "model": "test-model"},
+        "entry_base_url": "http://entry",
+    }
 
 
 def test_dashboard_api_loads_from_a_standalone_user_plugin(tmp_path: Path) -> None:
@@ -170,9 +191,8 @@ human_review: Check simulated-data disclosure.
     experiment = await service.run(
         pack_root=pack,
         case_path=case_path,
-        entry_base_url="http://entry",
         api_key="runtime-secret",
-        model_fingerprint={"provider": "custom", "model": "test-model"},
+        runtime_attestation=runtime_attestation(pack, case_path),
         trial_count=2,
     )
 
@@ -208,9 +228,8 @@ async def test_retained_experiment_propagates_explicit_scope_in_instructions(
     await ExperimentService(store, client_factory=lambda *_: client).run(
         pack_root=pack,
         case_path=case_path,
-        entry_base_url="http://entry",
         api_key="runtime-secret",
-        model_fingerprint={"model": "test-model"},
+        runtime_attestation=runtime_attestation(pack, case_path),
     )
 
     assert client.calls[0]["memory_scope"] == "candidate-one"
@@ -232,3 +251,60 @@ def test_case_rejects_workflow_and_requires_explicit_retained_scope(tmp_path: Pa
     )
     with pytest.raises(ValueError, match="memory_scope"):
         load_case(case_path)
+
+
+def test_studio_store_rejects_path_traversal_identifiers(tmp_path: Path) -> None:
+    root = tmp_path / ".atelier" / "v2"
+    store = StudioStore(root)
+
+    with pytest.raises(ValueError, match="Session"):
+        store.append_trace(
+            {
+                "event": "profile_call.started",
+                "call_id": "call-1",
+                "source_session_id": "../../../outside",
+            }
+        )
+    with pytest.raises(ValueError, match="Session"):
+        store.traces("../../../outside")
+    with pytest.raises(ValueError, match="Design"):
+        store.get_design("../../../outside")
+    with pytest.raises(ValueError, match="Experiment"):
+        store.get_experiment("../../../outside")
+
+    assert not (tmp_path / "outside.jsonl").exists()
+
+
+@pytest.mark.asyncio
+async def test_experiment_rejects_unattested_runtime_and_candidate_case_changes(
+    tmp_path: Path,
+) -> None:
+    pack = create_pack(tmp_path / "support")
+    case_path = pack / "cases" / "smoke.yaml"
+    store = StudioStore(tmp_path / ".atelier" / "v2")
+    attestation = runtime_attestation(pack, case_path)
+    attestation["source_revision"] = "different"
+
+    with pytest.raises(ValueError, match="selected source definition"):
+        await ExperimentService(store).run(
+            pack_root=pack,
+            case_path=case_path,
+            api_key="runtime-secret",
+            runtime_attestation=attestation,
+        )
+
+    attestation = runtime_attestation(pack, case_path)
+    with pytest.raises(ValueError, match="changed the Case"):
+        await ExperimentService(store).run(
+            pack_root=pack,
+            case_path=case_path,
+            api_key="runtime-secret",
+            runtime_attestation=attestation,
+            candidate={
+                "branch": "candidate",
+                "worktree": str(tmp_path),
+                "diff_summary": "profile-only change",
+                "baseline_pack_revision": "baseline",
+                "baseline_case_hash": "different",
+            },
+        )
