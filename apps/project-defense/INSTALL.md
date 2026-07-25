@@ -20,6 +20,7 @@ export HERMES_APP_API_KEY='use-a-long-random-secret'
 ./app start --instance defense-demo
 ./app status --instance defense-demo
 ./app attest --instance defense-demo
+./app live-probe --instance defense-demo
 ./app cases --instance defense-demo
 ```
 
@@ -41,7 +42,9 @@ for profile in defense-demo--host defense-demo--source defense-demo--architectur
 done
 ```
 
-为四个 Profile 分别创建权限 `0600` 的 `.env`，设置 loopback host、连续端口和同一 Gateway Key；在 `local/app-runtime.json` 中设置逻辑映射、当前 Agent 与 `host: [source, architecture, coach]` allowlist。release 中 host Distribution 必须包含 `plugins/profile_call`。最后分别执行 `hermes -p <physical-profile> gateway start`。
+为四个 Profile 分别创建权限 `0600` 的 `.env`，设置 loopback host、连续端口、各目标独立 Gateway Key，并只向 host 注入允许目标的 Key；运行 mapping 也只包含 self 和允许目标。release 中 host Distribution 必须包含 `plugins/profile_call`。最后分别执行 `hermes -p <physical-profile> gateway start`。
+
+wrapper 配置的是便利默认模型；Consumer 可用 Hermes 原生命令逐 Profile 覆盖。configured attestation 记录 config hash，live probe 报告各 Gateway 当前可观察模型。
 
 Source 的 `sample-source/` 和窄只读 Plugin 属于 Distribution，不需要宿主工程路径环境变量。
 
@@ -56,4 +59,4 @@ Source 的 `sample-source/` 和窄只读 Plugin 属于 Distribution，不需要�
 ./app stop --instance defense-demo
 ```
 
-该 Pack 标记 `review_required`。更新前先评估既有 caller-scoped Memory，必要时选择新 scope；wrapper 不会删除它。保留旧 release，smoke/回滚语义见仓库 [`docs/RELEASE.md`](../../docs/RELEASE.md)。
+该 Pack 标记 `review_required`。更新是 local、best-effort、experimental；先评估 caller-scoped Memory，必要时选择新 scope，wrapper 不会删除它。保留旧 release，语义见仓库 [`docs/RELEASE.md`](../../docs/RELEASE.md)。

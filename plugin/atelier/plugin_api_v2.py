@@ -277,6 +277,9 @@ async def pack_workspace(pack_id: str):
             "sessions": sessions,
             "session_discovery": session_discovery,
             "designs": store.list_designs(),
+            "experiments": [
+                item for item in store.list_experiments() if item.get("pack_id") == pack_id
+            ],
             "cases": cases,
             "releases": releases,
         }
@@ -396,10 +399,9 @@ async def run_experiment(request: ExperimentCreate):
             raise ValueError(f"unknown Case: {request.case_id}")
         runtime = _runtime(request.runtime_instance)
         attestation = runtime.attest(instance=request.runtime_instance)
-        key_env = str(attestation["gateway_key_env"])
-        api_key = os.environ.get(key_env, "")
-        if not api_key:
-            raise ValueError(f"missing API key environment: {key_env}")
+        entry_base_url, api_key = _runtime_api_key(request.runtime_instance)
+        if entry_base_url != attestation.get("entry_base_url"):
+            raise ValueError("entry runtime URL changed after configured attestation")
         return await ExperimentService(store).run(
             pack_root=pack.root,
             case_path=pack.root / matching[0],

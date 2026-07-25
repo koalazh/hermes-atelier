@@ -31,10 +31,11 @@ export HERMES_APP_API_KEY='use-a-long-random-secret'
 ./app start --instance support-demo
 ./app status --instance support-demo
 ./app attest --instance support-demo
+./app live-probe --instance support-demo
 ./app cases --instance support-demo
 ```
 
-`configure` 会把 Consumer 当前进程中的两个 Secret 写入每个 Profile 自己的 `.env`，权限设为 `0600`。命令行只传环境变量名，避免 Secret 进入 shell history。
+`configure` 把模型 Key 和每个目标独立的 Gateway Key 写入需要它们的 Profile `.env`，权限设为 `0600`。命令行只传环境变量名。wrapper 提供统一默认模型，Consumer 可随后用原生 `hermes -p <profile> config set` 做逐 Profile 覆盖。
 
 唯一入口使用 `--gateway-port`，其余 Agent 再连续分配。只将唯一入口 Profile 端口加入 ingress；其他端口保持 loopback 和 API Key 认证。
 
@@ -79,10 +80,10 @@ cd /absolute/new-release
 2. 停止旧 Profile Gateways；
 3. 安装/更新新 Distributions，删除新版本不再声明的物理 Profiles；
 4. 重建逻辑映射并保留模型、端口和 Secret 环境变量配置；
-5. 启动新 Gateways，以 `app.lock` 中首个 smoke Case 创建唯一 clean Session/Run，收集 Pack-local 临时 Trace，执行调用/输出断言和已声明的输出 Contract；
+5. 启动新 Gateways，以 `app.lock` 中首个 smoke Case 创建唯一 new Session/Run，读取固定实例 Trace directory，执行调用/输出断言和已声明的输出 Contract；
 6. 成功后保存新安装状态。
 
-失败时 wrapper 会停止新 Gateways，best-effort 重新安装旧 release、恢复旧 `app.lock`、映射和配置、重启旧服务并运行旧 smoke。外部进程、网络、模型和 Hermes 命令可能使回滚本身失败，因此该机制不宣称事务原子性；错误必须交给 Consumer 处理。
+失败时 wrapper 会停止新 Gateways，best-effort 重新安装旧 release、恢复旧 `app.lock`、映射和配置、重启旧服务并运行旧 smoke。该能力明确是 local、best-effort、experimental；不宣称事务原子、蓝绿、远程发布、流量切换或多主机一致性。
 
 更新保留 Consumer 的 `.env`、Memory、Sessions 和 `local/`。`state_compatibility` 只给出迁移提示，不自动清理状态。
 
@@ -96,4 +97,4 @@ cd /absolute/new-release
 
 ## 发布门禁
 
-发布前至少完成 Pack validate、Case parse、确定性测试、Ruff、build、Secret 扫描和 fresh `HERMES_HOME` 的 `attest`/`cases`。Case runner 独立于 Studio，执行后恢复运行映射并删除临时 Trace。真实模型 Case 只证明该次链路与断言，不证明生产质量或性能。
+发布前至少完成 Pack validate、Case parse、确定性测试、Ruff、build、Secret 扫描。Assurance 需要时再在 fresh `HERMES_HOME` 运行 `attest`、`live-probe` 和 `cases`。Case runner 使用固定实例 Trace directory，不临时改写任何 Profile 的共享 mapping。真实模型 Case 只证明该次链路与断言。

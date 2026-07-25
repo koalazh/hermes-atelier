@@ -2,13 +2,13 @@
 
 ## Case 是结果契约，不是 Workflow
 
-Case 用于表达一个可重复的行为问题：输入、初始状态、Memory Policy、少量通用断言和人工评价提示。它不能规定 Agent 的调用步骤、路由、并行或重试。
+Case 用于表达一个可重复的行为问题：输入、evaluation context、Memory Policy、少量通用断言和人工评价提示。它不能规定 Agent 的调用步骤、路由、并行或重试。
 
 ```yaml
 id: evidence-gap
 input: 我准备说这个队列把线上 p99 降低了 60%。请基于项目证据帮我完成答辩。
-initial_state: {}
-memory_policy: clean
+evaluation_context: {}
+memory_policy: new_session
 assertions:
   calls:
     required: [source]
@@ -28,25 +28,27 @@ human_review: 应拒绝无测量支持的数字，并给出有源码证据的更
 
 业务评分应通过应用自己的 evaluator seam 或人工反馈实现，不应不断把业务字段塞进 Atelier 核心。
 
-`initial_state` 是运行输入，不是 Workflow：Case runner 和 Experiment 会把它作为 JSON 上下文加入 Trial instructions，由 Agent 在回答前读取；空对象不添加额外上下文。它不能包含步骤、路由或工具编排字段。
+`calls.required` 只应在真实权限、可信数据来源或公共合同要求特定 Profile 时使用。普通质量 Case 优先检查可信证据、越权、虚构、未知表达、业务合同和专家失败降级，不把可观察调用树当作通用正确性。
+
+`evaluation_context` 只是作为 JSON 追加到 Trial instructions，没有执行 setup hook、fixture 或状态写入，因此不叫 `initial_state`。旧字段仍可兼容读取。
 
 ## Memory Policy
 
-- `clean`：Trial 使用新的 Session，不传长期 Memory scope；
-- `session_only`：Trial 仍使用新 Session，应用可以在该 Session 内延续上下文；
-- `retained`：Case 必须声明稳定 `memory_scope`。Experiment 通过 Header 绑定入口，并在 Trial instructions 中要求只把同一值传给明确支持 `memory_scope` 的有状态下游工具；应用仍需显式 scoped state 读写，Header 本身不保存内容。
+- `new_session`：只保证新的 Hermes Session，不保证 Profile Memory、`local/` 或外部系统为空；
+- `retained_scope`：Case 必须声明稳定 `memory_scope`，入口与明确支持 scope 的状态工具使用该 caller scope；
+- `fresh_instance`：要求安装记录证明使用新物理 Profiles/HERMES_HOME，才可声明没有旧 Session、Memory 与 local state。
 
-非 retained Case 禁止声明 `memory_scope`。`clean` instructions 明确禁止请求 retained downstream state。应用若启用 Hermes 全局 Profile Memory，Experiment 无法从 HTTP 边界证明 caller isolation；这类应用必须使用 fresh 物理实例或关闭全局 Memory。两个 V2 回归 Pack 均不依赖全局 Profile Memory。
+旧 `clean | session_only | retained` 分别兼容迁移为 `new_session | new_session | retained_scope`；新输出和文档不再把新 Session 称作严格 clean。非 `retained_scope` 禁止声明 `memory_scope`。
 
 ## Experiment 冻结内容
 
-Experiment 不接受调用方自报的 endpoint 或模型指纹。启动前，Atelier 对已安装 runtime instance 执行 attestation：校验 release 全文件 hash、实际安装的 Profile 文件、每个运行映射中的 Pack revision，以及 configure 时冻结的模型/Provider/URL。只有 attested source revision 和 Case hash 与当前所选 Pack 一致才运行。
+Experiment 不接受调用方自报的 endpoint 或模型指纹。启动前使用 `configured_runtime_attestation` 校验 release hash、安装资产、运行映射、逐 Profile config hash 与配置记录。`live_runtime_probe` 是独立、轻量的当前状态证据，不用猜测补全 configured 记录。
 
 启动时 Experiment 保存：
 
 - Pack ID、版本与定义 revision；
 - 每个 Profile Distribution 可发布文件的 Definition Snapshot；
-- runtime attestation 得到的模型/Provider 指纹与 release Definition Snapshot；
+- configured attestation 得到的逐 Profile 配置记录与 release Definition Snapshot；
 - Case 内容、文件 hash 与 Memory Policy；
 - 可选候选 Git metadata；
 - 1 到 20 个 Trial。
@@ -63,7 +65,7 @@ Experiment 不接受调用方自报的 endpoint 或模型指纹。启动前，At
 
 ## 人工反馈与 Reviewer
 
-人工反馈附加到冻结 Experiment，不会改写 Case 或 Trial。Reviewer 只能读取整个已完成或断言失败的 Experiment，输出观察、证据、假设、不确定性、风险和下一步验证建议。
+人工反馈附加到冻结 Experiment，不会改写 Case 或 Trial。默认可导出 JSON evidence bundle；只有开发者选择 `Review with Hermes` 时才需要 Reviewer Gateway。Reviewer 读取整个已完成或断言失败的 Experiment，输出观察、证据、假设、不确定性、风险和下一步验证建议。
 
 Reviewer 不能：
 

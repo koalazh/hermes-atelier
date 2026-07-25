@@ -22,6 +22,7 @@ export HERMES_APP_API_KEY='use-a-long-random-secret'
 ./app start --instance support-demo
 ./app status --instance support-demo
 ./app attest --instance support-demo
+./app live-probe --instance support-demo
 ./app cases --instance support-demo
 ```
 
@@ -50,7 +51,7 @@ for profile in support-demo--dispatcher support-demo--product support-demo--tran
 done
 ```
 
-随后为每个 Profile 创建权限 `0600` 的 `.env`，配置 `MODEL_API_KEY`、`API_SERVER_KEY`、`API_SERVER_HOST=127.0.0.1` 和各自端口；在 `local/app-runtime.json` 中写逻辑映射、`current_agent` 与 `allowed_calls`，再执行：
+随后为每个 Profile 创建权限 `0600` 的 `.env`，配置模型 Key、自身 Gateway Key、调用方允许目标的独立 Key、loopback host 和各自端口；在 `local/app-runtime.json` 中只写 self 与允许目标映射、`current_agent` 和 `allowed_calls`，再执行：
 
 ```bash
 hermes -p support-demo--dispatcher gateway start
@@ -60,6 +61,8 @@ hermes -p support-demo--transaction gateway start
 
 原生安装必须保证 release 中 dispatcher Distribution 已包含 `plugins/profile_call`。推荐用 `./app configure` 避免手工映射错误，但应用 Runtime 不依赖 wrapper 常驻。
 
+统一模型只是 wrapper 便利默认值。可随后分别执行 `hermes -p <physical-profile> config set model.default <model>`；不要把逐 Profile 模型写回 Manifest。
+
 ## 更新
 
-在新 release 目录中执行 `./app update --instance support-demo`。更新保留 `.env`、Memory、Sessions 和 `local/`，重启后用独立 Case runner 执行首个 smoke Case 的 Trace 与输出断言；若 Pack 声明机器可验证的 output contract，runner 也会校验该 contract。失败时 best-effort 恢复旧 release。保留旧 release 目录以支持回滚。
+在新 release 目录中执行 `./app update --instance support-demo`。它是 local、best-effort、experimental；保留 `.env`、Memory、Sessions 和 `local/`，失败时尝试恢复旧 release，但不保证事务原子。保留旧 release 目录。

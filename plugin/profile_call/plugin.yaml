@@ -1,5 +1,5 @@
 name: profile_call
-version: 2.0.0
+version: 2.1.0
 description: "Logical, allowlisted Hermes Profile calls without an Atelier runtime dependency"
 author: "Hermes Atelier"
 provides_tools:

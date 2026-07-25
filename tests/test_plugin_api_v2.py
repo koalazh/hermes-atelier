@@ -90,6 +90,7 @@ async def test_pack_workspace_discovers_instance_and_recent_sessions(
 
     assert workspace["instances"][0]["instance"] == "demo"
     assert workspace["sessions"] == [{"id": "recent-session", "title": "Recent"}]
+    assert workspace["experiments"] == []
     assert workspace["session_discovery"] == {
         "status": "available",
         "instance": "demo",
@@ -123,5 +124,7 @@ def test_dashboard_bundle_exposes_app_pack_workspace_without_manual_session_id()
         assert section in bundle
     assert "Export handoff" in bundle
     assert "Generate with Hermes" in bundle
+    assert "Export evidence bundle" in bundle
+    assert "Review with Hermes (optional)" in bundle
     assert "Recent entry Session" in bundle
     assert "Validated release" not in bundle

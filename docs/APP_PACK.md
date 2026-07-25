@@ -2,7 +2,7 @@
 
 ## 目的
 
-App Pack 是可复制、可放入 Git、可独立验证和安装的 Hermes 多 Profile 应用目录。它补充单个 Hermes Profile Distribution 无法表达的应用级信息：逻辑 Agent、唯一公开入口、调用权限、公开协议、状态策略、Cases 和 Contracts。
+App Pack 是可复制、可放入 Git、可独立验证和安装的 Hermes 应用目录；单 Profile 与多 Profile 都是正常形态。它补充单个 Distribution 无法表达的应用级分组：逻辑 Agent、唯一公开入口、调用声明、公开协议、状态声明、Cases 和 Contracts。
 
 它不是包管理平台、远程 Agent Registry、Workflow DSL、部署控制面或运行时数据库。
 
@@ -32,7 +32,7 @@ my-app/
 ```yaml
 schema_version: 2
 id: sample-app
-version: 2.0.0
+version: 2.1.0
 entry: host
 agents:
   host:
@@ -60,11 +60,18 @@ contracts: []
 - Distribution 路径必须是 Pack 内的相对目录，并包含 `distribution.yaml`；
 - `allowed_calls` 的来源和目标必须已声明，不能自调用或重复；
 - `public_api` 当前只接受 Hermes 原生 OpenAI 兼容端点；
-- Manifest 任意深度都禁止 Workflow 关键词；
-- Case 与 Contract 必须存在、不能重复且不能逃逸 Pack 根目录；Case 必须通过完整 schema/Memory Policy/Workflow key 校验，Contract 必须是 JSON object；
+- Schema V2 使用 Pydantic `extra="forbid"`，但不递归审查自然语言或嵌套配置是否包含设计哲学关键词；
+- Case 与 Contract 必须存在、不能重复且不能逃逸 Pack 根目录；Case 必须通过完整 schema 与 Memory Policy 校验，Contract 必须是 JSON object；
 - `public_api.output_contract` 必须是 Pack 内相对路径，并已列入 `contracts`。
 
-## 状态策略
+## 字段保证与状态声明
+
+字段含义必须区分四层：
+
+- 机器保证：schema、路径、唯一 entry、Distribution 存在性、release filter 和 lock hash；
+- Pack 声明：`state_policy`、`state_compatibility`、`allowed_calls`、`collaboration`；
+- Consumer 责任：网络/进程隔离、入口 ingress、模型选择、Secret、状态迁移和生产部署；
+- Hermes 限制：Profile 全局 Memory、同 OS 用户文件权限、Plugin/Gateway 的实际能力。
 
 - `stateless`：应用定义不依赖跨请求状态；Hermes 仍可能保留平台级运行记录。
 - `session_only`：同一 Hermes Session 内允许上下文延续，不声明跨 Session 长期状态。
@@ -80,7 +87,7 @@ contracts: []
 
 Pack 永远只引用 `host`、`expert` 之类的逻辑 ID。安装时 Consumer 选择 `instance`，物理 Profile 为 `<instance>--<logical-id>`。例如 `support-demo--host`。
 
-每个 Profile 的 `local/app-runtime.json` 保存逻辑到物理 Profile、loopback URL、API Key 环境变量名和该来源的 `allowed_calls`。它不保存 API Key。运行映射属于 Consumer 运行态，不进入 release。
+每个 Profile 的 `local/app-runtime.json` 只保存 self 与允许目标的物理 Profile、loopback URL、独立 API Key 环境变量名和该来源的 `allowed_calls`。它不保存 Key。`.env` 只注入该调用方真正需要的目标 Key。这个边界是 `profile_call` Tool Policy 与凭据最小化，不是同一 OS 用户下的强授权隔离。
 
 ## 发布过滤
 
@@ -96,4 +103,8 @@ uv run atelier cases apps/mini-voc
 uv run atelier release apps/mini-voc /tmp/mini-voc-release --git-revision HEAD
 ```
 
-Validator 验证结构和边界，不证明 SOUL 质量、模型行为或生产可用性。Release 安装后使用 `./app attest --instance <id>` 校验实际文件/模型/入口，使用 `./app cases --instance <id>` 在独立 Session 中执行全部 Cases。Hermes 安装会把 `distribution.yaml` 改写为安装回执，configure 会改写 `config.yaml`；wrapper 在 `runtime.json` 中记录这两类显式变换的实际 hash 和变换策略，其他 Distribution 资产必须继续直接匹配 `app.lock`。真实模型结果仍需人工审阅。
+Validator 只证明结构和发布边界，不证明 SOUL、模型行为或生产可用性。证据等级为 `packed`、`installed`、`configured`、`runtime_attested`、`live_probed`、`cases_passed`、`fresh_verified`；层级可缺失，不能把 `packed` 称为 validated release。
+
+`./app attest` 生成 `configured_runtime_attestation`，校验 lock、安装资产、映射和逐 Profile 配置记录。`./app live-probe` 通过各 Profile Gateway 检查 health、Hermes version、capabilities 与 observable models；无法从 Hermes API 确认的 Profile identity 标为 `unverified`。`./app cases` 使用固定实例 Trace 目录，不修改共享 mapping。真实模型结果仍需人工审阅。
+
+wrapper 只提供统一默认模型的便利配置。Consumer 可以用 Hermes 原生命令逐 Profile 覆盖，Manifest 不新增模型字段；configured attestation 标明实际 config hash 是否仍匹配 wrapper 记录，live probe 报告当前可观察模型。

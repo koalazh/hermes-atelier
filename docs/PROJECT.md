@@ -1,10 +1,10 @@
-# Hermes Atelier V2 项目说明
+# Hermes Atelier V2.1 项目说明
 
 ## 最终解决的问题
 
-Hermes 已经提供 Profile、Session、Run、Memory、Gateway、Plugins、Kanban 和 Dashboard。Atelier 只补足多 Profile 应用的开发闭环：多轮设计、真实协作观察、可复现 Case/Experiment，以及独立 App Pack 交付。
+Hermes 已经提供 Profile、Session、Run、Memory、Gateway、Plugins、delegation、Kanban 和 Dashboard。Atelier Core 只补足应用开发闭环：多轮意图对齐、Coding Agent handoff、App Pack 分组/Lens 和独立 HTTP 交付。单 Profile 同样成立。
 
-Atelier 的价值不是“让应用运行”，而是帮助开发者回答：目标是否对齐、Profile 边界是否有理由、真实调用发生了什么、不同定义和 Memory 条件是否可比较、交付物能否脱离 Studio 安装。
+Atelier 的价值不是“让应用运行”，而是帮助开发者回答：目标是否对齐、是否真的需要多个 Profiles、实现者得到哪些边界、交付物能否脱离 Studio。更高可信度的问题由可选 Assurance Lab 回答。
 
 ## 为什么不是 AgentHub
 
@@ -18,7 +18,7 @@ V2 发布应用只依赖 Hermes 和 Pack。Atelier Trace 是可选观测，故�
 
 ## 为什么需要 App Pack
 
-单个 Profile Distribution 不足以表达多 Profile 应用的逻辑 Agent、权限边界、公开入口、状态策略、Cases 和 Contracts。App Pack 是克制的版本化目录约定，不是包管理平台，也不包含运行态。
+一个或多个 Profile Distributions 需要应用级分组、唯一公开入口、调用声明、状态声明、Cases 和 Contracts。App Pack 是克制的版本化目录约定，不是包管理平台，也不包含运行态。
 
 ## 为什么 profile_call 独立于 Studio
 
@@ -29,8 +29,9 @@ V2 发布应用只依赖 Hermes 和 Pack。Atelier Trace 是可选观测，故�
 | 组件 | 拥有 |
 | --- | --- |
 | Hermes | Profile、Gateway、Session、Run、Memory、Plugins、模型、工具与进程生命周期 |
-| Atelier Studio | Design/PLAN/Draft 开发体验、真实 Trace 索引、Case/Experiment、Release 验证 |
-| App Pack | 逻辑 Agent、Distributions、权限边界、Public API、状态策略、Cases、Contracts |
+| Atelier Core | Design、PLAN/handoff、App Pack Lens、Delivery |
+| Assurance Lab | 可选 Trace、configured/live 证据、Cases、Experiment、Reviewer、update evidence |
+| App Pack | 逻辑 Agent、Distributions、调用声明、Public API、状态声明、Cases、Contracts |
 | Consumer | 实例名、Secret、端口、ingress、运行映射、用户状态、部署和业务组合 |
 
 ## V1 被证明错误的抽象
@@ -43,7 +44,7 @@ V2 发布应用只依赖 Hermes 和 Pack。Atelier Trace 是可选观测，故�
 - 统一模型注入和所有业务 Profile 强制安装 Atelier Plugin；
 - 对当前工作树直接 `git apply`。
 
-旧代码保留为迁移期回归证据，不再由 V2 Plugin manifest、CLI 或 Dashboard 活动入口引用。
+V1 运行模块和内部状态机测试已退出 V2.1 发布包；Git history 保留历史证据。
 
 ## 应贡献给 Hermes 上游的能力
 

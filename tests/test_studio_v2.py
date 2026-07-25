@@ -87,7 +87,7 @@ class FakeBuilderClient:
 
     async def start_run(self, **kwargs: Any) -> str:
         self.calls.append(kwargs)
-        if "explicitly selected Generate Draft" in kwargs["task"]:
+        if "explicitly selected Generate with Hermes" in kwargs["task"]:
             match = re.search(r"write only beneath (.+?)\. Generate", kwargs["task"])
             assert match
             create_pack(Path(match.group(1)) / "generated")

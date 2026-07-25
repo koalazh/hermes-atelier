@@ -47,7 +47,7 @@ def test_readme_covers_user_and_developer_paths() -> None:
         "安装开发环境",
         "验证与发布一个 Pack",
         "更新语义",
-        "两个回归应用",
+        "四个回归 App Packs",
         "Studio 配置",
         "状态与安全",
         "文档",
@@ -56,6 +56,8 @@ def test_readme_covers_user_and_developer_paths() -> None:
     for heading in required:
         assert f"## {heading}" in text
     assert "profile_call" in text
+    assert "IMPLEMENTATION_HANDOFF.md" in text
+    assert "Assurance Lab" in text
     assert "./app update" in text
     assert "docs/MIGRATION_FROM_V1.md" in text
 

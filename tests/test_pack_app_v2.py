@@ -450,7 +450,7 @@ def test_configured_attestation_and_live_probe_are_distinct_per_profile_evidence
 
     def urlopen(request: object, *, timeout: float) -> FakeHTTPResponse:
         assert timeout == 0.1
-        url = str(getattr(request, "full_url"))
+        url = str(request.full_url)  # type: ignore[attr-defined]
         if url.endswith("/health"):
             return FakeHTTPResponse(
                 {"status": "ok", "platform": "hermes-agent", "version": "0.19.0"}

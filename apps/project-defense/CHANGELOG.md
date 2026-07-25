@@ -1,5 +1,12 @@
 # Project Defense 变更记录
 
+## 2.1.0
+
+- Case 使用 `new_session` / `retained_scope` 语义；
+- 不再仅因 Trace 禁用 Hermes delegation；
+- configure 使用逐目标 Key 与最小 runtime mapping；
+- 保持 App Pack Schema V2 不变。
+
 ## 2.0.0
 
 - 迁移到逻辑 Agent App Pack 和 Hermes 原生 Session/Run；

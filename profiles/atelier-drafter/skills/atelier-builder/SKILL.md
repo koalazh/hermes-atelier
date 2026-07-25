@@ -43,7 +43,7 @@ Each `agents.*.distribution` directory is a Hermes Profile Distribution containi
 ```yaml
 id: smoke
 input: "A realistic user input"
-memory_policy: clean
+memory_policy: new_session
 assertions: {}
 human_review: "What a reviewer should inspect in the outcome."
 ```

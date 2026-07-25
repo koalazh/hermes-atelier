@@ -4,15 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-atelier"
-version = "2.0.0"
-description = "Design, observe, evaluate, and release Hermes App Packs"
+version = "2.1.0"
+description = "Design and deliver Hermes App Packs with optional assurance evidence"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "pydantic>=2.10,<3",
   "pyyaml>=6.0,<7",
-  "uvicorn>=0.34,<1",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +26,22 @@ atelier = "plugin.atelier.cli_v2:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["plugin"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/AGENTS.md",
+  "/README.md",
+  "/apps",
+  "/docs",
+  "/plugin",
+  "/profiles",
+  "/pyproject.toml",
+  "/tests",
+  "/uv.lock",
+]
+
+[tool.hatch.build.targets.sdist.force-include]
+"plugin/atelier" = "plugin/atelier"
 
 [tool.pytest.ini_options]
 addopts = "-q"

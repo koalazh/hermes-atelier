@@ -100,14 +100,14 @@
     }
     function restore(id) {
       if (!id) { setDesign(null); return; }
-      act(json("/designs/" + id));
+      act(json("/designs/" + encodeURIComponent(id)));
     }
     function create() { act(post("/designs", { requirement: requirement })); }
     function send() {
-      act(post("/designs/" + design.id + "/messages", { content: message }));
+      act(post("/designs/" + encodeURIComponent(design.id) + "/messages", { content: message }));
       setMessage("");
     }
-    function generate() { act(post("/designs/" + design.id + "/generate-draft")); }
+    function generate() { act(post("/designs/" + encodeURIComponent(design.id) + "/generate-draft")); }
     function exportHandoff() {
       download("PLAN.md", design.plan || "");
       download("IMPLEMENTATION_HANDOFF.md", design.implementation_handoff || "");
@@ -165,6 +165,7 @@
   function SessionsEvidence(props) {
     var workspace = props.workspace;
     var sessions = workspace.sessions || [];
+    var sessionsKey = sessions.map(function (item) { return item.id || item.session_id || ""; }).join("|");
     var sessionState = useState(sessions[0] ? (sessions[0].id || sessions[0].session_id || "") : "");
     var sessionId = sessionState[0];
     var setSessionId = sessionState[1];
@@ -175,11 +176,12 @@
     var error = errorState[0];
     var setError = errorState[1];
     useEffect(function () {
-      if (!sessionId && sessions[0]) setSessionId(sessions[0].id || sessions[0].session_id || "");
-    }, [sessions.length]);
+      var available = sessions.map(function (item) { return item.id || item.session_id || ""; });
+      if (available.indexOf(sessionId) === -1) setSessionId(available[0] || "");
+    }, [sessionsKey]);
     useEffect(function () {
       if (!sessionId) return;
-      json("/sessions/" + sessionId + "/traces").then(setLens).catch(function (value) { setError(value.message); });
+      json("/sessions/" + encodeURIComponent(sessionId) + "/traces").then(setLens).catch(function (value) { setError(value.message); });
     }, [sessionId]);
 
     return h("div", { className: "atelier-grid playground" },
@@ -238,7 +240,7 @@
     var curl = "curl " + entry + "/v1/chat/completions \\\n  -H \"Authorization: Bearer $HERMES_APP_API_KEY\" \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'";
     function release() {
       setError("");
-      post("/packs/" + pack.id + "/release", {}).then(setReleased).catch(function (value) { setError(value.message); });
+      post("/packs/" + encodeURIComponent(pack.id) + "/release", {}).then(setReleased).catch(function (value) { setError(value.message); });
     }
     return h("div", { className: "atelier-grid two" },
       h("section", { className: "atelier-card" },
@@ -261,6 +263,9 @@
   function AssuranceLab(props) {
     var workspace = props.workspace;
     var instances = workspace.instances || [];
+    var instancesKey = instances.map(function (item) { return item.instance; }).join("|");
+    var experiments = workspace.experiments || [];
+    var experimentsKey = experiments.map(function (item) { return item.id; }).join("|");
     var instanceState = useState(instances[0] ? instances[0].instance : "");
     var instance = instanceState[0];
     var setInstance = instanceState[1];
@@ -270,10 +275,31 @@
     var errorState = useState("");
     var error = errorState[0];
     var setError = errorState[1];
+    var experimentState = useState(experiments[0] ? experiments[0].id : "");
+    var experimentId = experimentState[0];
+    var setExperimentId = experimentState[1];
+    useEffect(function () {
+      var available = instances.map(function (item) { return item.instance; });
+      if (available.indexOf(instance) === -1) setInstance(available[0] || "");
+    }, [instancesKey]);
+    useEffect(function () {
+      var available = experiments.map(function (item) { return item.id; });
+      if (available.indexOf(experimentId) === -1) setExperimentId(available[0] || "");
+    }, [experimentsKey]);
     function run(path, body) {
       setError("");
       post(path, body).then(function (value) { setOutput(value); props.reload(); })
         .catch(function (value) { setError(value.message); });
+    }
+    function exportEvidence() {
+      setError("");
+      json("/experiments/" + encodeURIComponent(experimentId)).then(function (value) {
+        download("atelier-experiment-" + experimentId + ".json", JSON.stringify(value, null, 2));
+        setOutput(value);
+      }).catch(function (value) { setError(value.message); });
+    }
+    function reviewWithHermes() {
+      run("/experiments/" + encodeURIComponent(experimentId) + "/review");
     }
     return h("div", { className: "atelier-grid review-grid" },
       h("section", { className: "atelier-card" },
@@ -284,10 +310,17 @@
         h("select", { className: "atelier-input", value: instance, onChange: function (event) { setInstance(event.target.value); } },
           instances.map(function (item) { return h("option", { key: item.instance, value: item.instance }, item.instance); })),
         h("div", { className: "actions" },
-          h(Button, { disabled: !instance, onClick: function () { run("/instances/" + instance + "/attest"); } }, "Configured attestation"),
-          h(Button, { disabled: !instance, onClick: function () { run("/instances/" + instance + "/live-probe"); } }, "Live probe"),
-          h(Button, { disabled: !instance, onClick: function () { run("/instances/" + instance + "/cases", {}); } }, "Run Cases")),
-        h("p", { className: "muted" }, "Export the resulting JSON evidence bundle by default. Review with Hermes remains an optional follow-up."),
+          h(Button, { disabled: !instance, onClick: function () { run("/instances/" + encodeURIComponent(instance) + "/attest"); } }, "Configured attestation"),
+          h(Button, { disabled: !instance, onClick: function () { run("/instances/" + encodeURIComponent(instance) + "/live-probe"); } }, "Live probe"),
+          h(Button, { disabled: !instance, onClick: function () { run("/instances/" + encodeURIComponent(instance) + "/cases", {}); } }, "Run Cases")),
+        h("label", null, "Completed Experiment"),
+        h("select", { className: "atelier-input", value: experimentId, onChange: function (event) { setExperimentId(event.target.value); } },
+          [h("option", { key: "", value: "" }, "No Experiment selected")].concat(experiments.map(function (item) {
+            return h("option", { key: item.id, value: item.id }, item.id.slice(0, 8) + " / " + item.status);
+          }))),
+        h("div", { className: "actions" },
+          h(Button, { kind: "primary", disabled: !experimentId, onClick: exportEvidence }, "Export evidence bundle"),
+          h(Button, { disabled: !experimentId, onClick: reviewWithHermes }, "Review with Hermes (optional)")),
         h(ErrorBox, { error: error })),
       h("section", { className: "atelier-card" },
         h("div", { className: "eyebrow" }, "EVIDENCE BUNDLE"),
@@ -320,7 +353,7 @@
     }
     function reloadWorkspace(id) {
       if (!id) return Promise.resolve();
-      return json("/packs/" + id + "/workspace").then(setWorkspace)
+      return json("/packs/" + encodeURIComponent(id) + "/workspace").then(setWorkspace)
         .catch(function (value) { setError(value.message); });
     }
     function reload() { return reloadOverview().then(function () { return reloadWorkspace(packId); }); }

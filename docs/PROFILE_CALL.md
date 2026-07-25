@@ -7,7 +7,7 @@
 它负责：
 
 - 从当前 Profile 的 `local/app-runtime.json` 获取逻辑身份和映射；
-- 校验来源到目标的 `allowed_calls`；
+- 按 `allowed_calls` Tool Policy 校验来源到目标；
 - 以目标 Profile 的 Gateway API Key 调用 Hermes `/v1/runs`；
 - 为目标创建独立 Session，按 SSE 等待真实终态；
 - 返回目标逻辑 ID、物理 Profile、Session、Hermes Run 和 `call_id`；
@@ -44,7 +44,7 @@
 }
 ```
 
-这些字段来自实际 Hermes 调用，不能由自然语言或 Atelier 数据库推断。Plugin handler 的错误结果使用 `ok: false` 和 `error_type: profile_call_failed`；调用方可据此诚实说明证据不可用，但不得把失败解释为业务状态。
+这些字段来自实际 Hermes 调用，不能由自然语言或 Atelier 数据库推断。Plugin handler 的错误结果使用 `ok: false` 和 `error_type: profile_call_failed`；异常发生在子 Run 创建后时还可能带 `stop_status`。
 
 ## Runtime Mapping
 
@@ -52,35 +52,38 @@
 {
   "schema_version": 1,
   "pack_id": "mini-voc",
-  "pack_version": "2.0.0",
+  "pack_version": "2.1.0",
   "instance": "support-demo",
   "current_agent": "dispatcher",
   "agents": {
     "product": {
       "profile": "support-demo--product",
       "base_url": "http://127.0.0.1:19301",
-      "api_key_env": "HERMES_APP_API_KEY"
+      "api_key_env": "HERMES_APP_API_KEY__PRODUCT"
     }
   },
   "allowed_calls": {"dispatcher": ["product", "transaction"]}
 }
 ```
 
-Wrapper 为每个物理 Profile 生成完整映射，但校验始终以 `current_agent` 的 allowlist 为准。API Key 只从目标进程环境读取。
+Wrapper 为每个 Profile 只生成 self 与允许目标映射，并为每个目标生成独立 Key；调用方 `.env` 只获得所需目标 Key。API Key 只从目标声明的环境变量读取。这个设计约束正常工具路径并减少凭据暴露，但 `terminal.cwd` 不是沙箱，同一 OS 用户也不是进程隔离，因此不能把 `allowed_calls` 宣称为强 RBAC。
 
 ## Session 与 Memory
 
-来源 Session ID 只用于关联；clean 调用创建 `pc_<call-id>` 形式的独立 Hermes Session。显式 `memory_scope` 会被 SHA-256 后截取为派生 scope ID，目标 Session 为 `pcms_<scope-id>_<call-id>`；原始 scope 不写入 Session ID 或 Trace。该 hash 用于标识符最小化，不应被当作低熵 scope 的加密保护。`/v1/runs` 的 `session_id` 是调用身份，不等同于 Hermes Chat 的多轮消息载入。
+来源 Session ID 只用于关联；不带 scope 的调用创建 `pc_<call-id>` 形式的新 Hermes Session，但这不保证目标 Profile 的 Memory 或 local state 为空。显式 `memory_scope` 会被 SHA-256 后截取为派生 scope ID，目标 Session 为 `pcms_<scope-id>_<call-id>`；原始 scope 不写入 Session ID 或 Trace。该 hash 用于标识符最小化，不应被当作低熵 scope 的加密保护。
 
 只有显式 `memory_scope` 才发送 `X-Hermes-Session-Key` 并生成 scope ID。该 Header 不会自动写 Memory；Hermes 0.19.0 的 `MEMORY.md` / `USER.md` 仍是物理 Profile 全局文件。需要 caller isolation 的应用应让自己的状态工具从 `pcms_` Session 读取 scope ID，并把状态保存在 Profile `local/` 下；只有工具成功后才能声称已经保存。Project Defense Coach 使用这一模式并禁用 Hermes 全局 Memory。
 
 ## Trace 失败语义
 
-Trace 是 best-effort 开发观测：
+Trace 是 best-effort 开发观测，并与业务 HTTP 解耦：
 
 - dispatch 前映射缺失、目标越权、Secret 缺失或目标 HTTP 失败：业务调用失败；
-- 目标已成功但 Trace Sink 失败：返回真实结果并设置 `trace_degraded: true`；
-- 没有 Trace 不能单独证明“没有调用”，应结合目标 Hermes Session/Run 证据。
+- Trace HTTP 使用独立 Client 和极短 timeout；started 失败立即 dispatch，completed 失败仍返回真实结果；
+- 文件 Trace 按 source Session 哈希分文件，写入失败只设置 `trace_degraded: true`；
+- timeout、caller cancellation、SSE 断开、网络或解析失败后 best-effort 调用 Hermes stop；
+- `stop_requested` 只说明 Hermes 接受停止请求；无法确认终态时必须写 `stop_unknown`；
+- Lens 区分 `complete_trace | partial_trace | unobserved_collaboration_possible`。
 
 Trace 不应保存 Secret；Studio 接收端还会执行脱敏。
 

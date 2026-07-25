@@ -1,5 +1,5 @@
 name: atelier-builder
-version: 2.0.0
+version: 2.1.0
 description: "Multi-turn App Pack design and explicit Draft builder for Hermes Atelier"
 hermes_requires: ">=0.19.0"
 author: "Hermes Atelier"

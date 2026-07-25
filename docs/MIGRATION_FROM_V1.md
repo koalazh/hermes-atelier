@@ -10,7 +10,7 @@ V1 把 Atelier Run、SQLite、Endpoint/PID Registry、后台 Profile 任务和 `
 | Atelier Root Run / Span | Hermes 原生 Session / Run，加可选 Trace 索引 |
 | `.atelier/atelier.db` 运行事实源 | Hermes 运行态；`.atelier/v2` 只存开发证据 |
 | Endpoint/PID Registry 与后台 supervisor | Hermes `gateway start/stop/status` |
-| 一次性 Build | Builder 原生多轮 Session + 显式 Drafter |
+| 一次性 Build | Builder 原生多轮 Session + 默认 Coding Agent handoff + 可选 Drafter |
 | Playground 包装 Chat | 直接 Hermes Chat/Session/OpenAI API |
 | 单 Run Review/Proposal/Replay | 冻结 Case/Experiment/Trial + Git 候选 |
 | `app.yaml` 物理 Profile/场景 | V2 逻辑 Agents/App Pack/Cases/Contracts |
@@ -19,9 +19,9 @@ V1 把 Atelier Run、SQLite、Endpoint/PID Registry、后台 Profile 任务和 `
 
 不要机械改字段。先明确唯一公开入口、内部逻辑 Agent、每个 Distribution、权限边界、公开 OpenAI 端点和状态策略，再写 `schema_version: 2`。
 
-V2 禁止把 V1 Scenario 中的隐式调用顺序搬进 `app.yaml` 或 Case。路由行为应在入口 SOUL/Skill 中表达，Case 只验证结果和真实调用事实。
+不要把 V1 Scenario 中的隐式调用顺序搬进 `app.yaml` 或 Case。路由行为由 Agent 与其能力决定；Case 优先验证结果、可信证据、越权和诚实降级。
 
-旧 `scenarios/` 可在迁移期保留作历史对照，但活动 CLI、Manifest 和 Release 只引用 `cases/`。
+旧 `scenarios/` 已从 V2.1 工作树和发布包删除，历史可从 V1/V2 Git tag 或 commit 读取；活动 Manifest 只引用 `cases/`。
 
 ## Runtime 迁移
 
@@ -36,7 +36,7 @@ V2 禁止把 V1 Scenario 中的隐式调用顺序搬进 `app.yaml` 或 Case。�
 
 ## Builder 与候选迁移
 
-V1 Builder 写入当前应用草稿并可进入 Proposal/Patch。V2 Builder 规划 Profile 无写权限；只有开发者显式触发 Drafter，且输出必须通过 V2 AppPack Validator。Draft 仍只是候选。
+V1 Builder 写入当前应用草稿并可进入 Proposal/Patch。V2.1 Builder 默认导出 PLAN 与 `IMPLEMENTATION_HANDOFF.md` 给开发者选择的 Coding Agent；Hermes Drafter 是可选路径，输出必须通过 V2 AppPack Validator。
 
 已有 Proposal 不应自动重放。把需要保留的改动整理为 Git branch/worktree，展示 Diff，以冻结 Experiment 重新验证后人工合并。
 
@@ -50,15 +50,15 @@ V2 不迁移 Atelier SQLite 中的 Run/Span/PID 为 Hermes 状态。若历史数
 
 ## 兼容代码状态
 
-仓库中的 V1 services、SQLite Store、旧 Dashboard bundle 和旧脚本暂时作为迁移期回归证据保留，以证明 V2 没有破坏已测试的历史行为。它们不被 V2 `plugin.yaml`、CLI entry point 或 `index_v2.js` 引用，也不得用于新安装。
+V2.1 已删除 V1 services、SQLite Store、旧 CLI/API/Dashboard bundle、旧脚本和只验证旧内部状态机的测试；wheel/sdist 回归明确验证它们不再进入发布包。V2 公用的路径、错误、脱敏和 Hermes HTTP 模块继续保留。
 
-当下游迁移完成且相关回归价值消失时，应在独立删除任务中连同 V1 tests 一起移除，避免边迁移边重写历史证据。
+需要读取 V1 数据时应使用旧 Git tag/commit 中的只读工具，不在 V2.1 发布包恢复写路径或兼容依赖。
 
 ## 迁移完成检查
 
 - 发布目录中没有 Atelier Plugin、SQLite、`.env`、Memory、Session、Trace、PID 或 `local/`；
 - Studio/Dashboard 停止后，入口 Chat 和内部 `profile_call` 仍成功；
 - 真实返回包含目标 Profile、Session、Run 与 call ID；
-- V2 Case 不含 Workflow key，Experiment 冻结定义与模型条件；
+- 新 Case 使用 `new_session | retained_scope | fresh_instance` 与 `evaluation_context`，旧字段只做兼容读取；
 - 更新 smoke 失败能恢复旧映射或明确报告回滚失败；
 - 只有 Consumer 选择的入口端口对外暴露。

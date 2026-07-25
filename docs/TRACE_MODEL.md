@@ -36,14 +36,17 @@ started 在目标 dispatch 前尝试上报；completed/failed 在目标真实终
 
 Experiment Trial 创建唯一来源 Session。断言只读取该 `source_session_id` 的 Trace，避免跨 Trial 污染。Trial 同时保存入口 Hermes Run ID、终态和输出；Trace 只是协作证据的一部分。
 
-`clean` 与 `session_only` 不传长期 scope；`retained` 将独立 `memory_scope` 传给入口 Run，并要求有状态下游继续显式传递。`profile_call` 只在目标 Session ID 中放截断 SHA-256 派生 ID，不直接放原始 scope；这只是标识符最小化，不是针对低熵 scope 的加密保护。Session ID、原始 scope 与应用的 Profile-local scoped state 不能混为一谈。
+`new_session` 不传长期 scope，但只证明新 Hermes Session；`retained_scope` 将独立 `memory_scope` 传给入口 Run；`fresh_instance` 还要求新物理运行实例。`profile_call` 只在目标 Session ID 中放截断 SHA-256 派生 ID，不直接放原始 scope。
 
 ## 降级与证据边界
 
-dispatch 前无法解析映射、授权目标或读取 Secret 时失败关闭。目标已经完成但 Trace Sink 不可用时，`profile_call` 返回真实业务结果并设置 `trace_degraded=true`。
+dispatch 前无法解析映射、按 Tool Policy 允许目标或读取 Secret 时失败关闭。Trace 使用独立 Client 与极短 timeout；started 上报失败立即继续 dispatch，completed 上报失败仍返回真实业务结果并设置 `trace_degraded=true`。固定 Trace directory 按 source Session hash 分文件，Case 并发不会改写共享 runtime mapping。
 
 因此：
 
+- `complete_trace` 表示每个可见 started 都有可见终态；
+- `partial_trace` 表示可见事件不完整；
+- `unobserved_collaboration_possible` 表示没有 `profile_call` 事件，但原生 delegation、Kanban、MCP 或其他协作仍可能发生；
 - completed Trace 可证明该目标调用完成；
 - failed Trace 可证明尝试及其失败，但不能证明业务状态；
 - 没有 Trace 不能单独证明没有调用；

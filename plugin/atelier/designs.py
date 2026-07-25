@@ -185,15 +185,17 @@ class DesignService:
     async def generate_draft(self, design_id: str) -> dict[str, Any]:
         design = self.store.get_design(design_id)
         if design["status"] != "plan_ready" or not design["messages"]:
-            raise ValueError("Generate Draft requires an aligned Builder conversation")
+            raise ValueError("Generate with Hermes requires an aligned Builder conversation")
         if not self.drafter_base_url or not self.drafter_api_key:
-            raise ValueError("Generate Draft requires an explicitly write-scoped Drafter Profile")
+            raise ValueError(
+                "Generate with Hermes requires an explicitly configured Drafter Profile"
+            )
         draft = Path(design["draft_path"])
         draft.mkdir(parents=True, exist_ok=False)
         design["status"] = "generating_draft"
         self.store.save_design(design)
         prompt = (
-            "The developer explicitly selected Generate Draft. Read the approved PLAN.md at "
+            "The developer explicitly selected Generate with Hermes. Read the approved PLAN.md at "
             f"{design['plan_path']} and implementation handoff at {design['handoff_path']}. "
             f"You may now write only beneath {draft}. Generate exactly one "
             "Hermes App Pack V2 Draft. Do not install, start, adopt, commit, or claim approval."
