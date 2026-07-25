@@ -86,3 +86,21 @@ async def test_uses_native_session_create_and_chat_for_multiturn() -> None:
             {"message": "continue", "instructions": "planning only"},
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_lists_native_sessions_without_reimplementing_session_state() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/sessions"
+        assert request.url.params["limit"] == "7"
+        return httpx.Response(
+            200,
+            json={"sessions": [{"id": "recent-session", "title": "Recent"}]},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as raw_client:
+        client = HermesHTTPClient("http://profile", "local-secret", client=raw_client)
+        sessions = await client.sessions(limit=7)
+
+    assert sessions == [{"id": "recent-session", "title": "Recent"}]

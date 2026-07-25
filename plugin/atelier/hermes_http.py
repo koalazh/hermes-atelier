@@ -171,6 +171,23 @@ class HermesHTTPClient:
         )
         return messages if isinstance(messages, list) else []
 
+    async def sessions(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        response = await self._request("GET", f"/api/sessions?limit={limit}")
+        if response.status_code != 200:
+            raise AtelierError(
+                "trace_degraded",
+                f"Hermes Session list returned HTTP {response.status_code}",
+            )
+        payload = response.json()
+        if isinstance(payload, list):
+            return payload
+        values = (
+            payload.get("sessions", payload.get("data", []))
+            if isinstance(payload, dict)
+            else []
+        )
+        return values if isinstance(values, list) else []
+
     async def health(self) -> dict[str, Any]:
         response = await self._request("GET", "/health")
         if response.status_code != 200:

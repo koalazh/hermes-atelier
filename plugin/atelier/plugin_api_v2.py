@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from .app_pack import AppPack, build_definition_snapshot, release_pack
 from .designs import DesignService
 from .evaluation import ExperimentService, load_case
+from .hermes_http import HermesHTTPClient
 from .pack_app import PackRuntime
 from .paths import apps_root, atelier_root, ensure_within
 from .studio_store import StudioStore
@@ -59,6 +60,10 @@ class ReleaseRequest(BaseModel):
     git_revision: str | None = Field(default=None, max_length=200)
 
 
+class CaseRunRequest(BaseModel):
+    case_id: str | None = None
+
+
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, KeyError):
         return HTTPException(status_code=404, detail=str(exc))
@@ -102,6 +107,93 @@ def _runtime(instance: str) -> PackRuntime:
     return PackRuntime(Path(str(install["pack_path"])), hermes_home=home)
 
 
+def _installed_instances(pack_id: str | None = None) -> list[dict[str, Any]]:
+    home = Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser().resolve()
+    root = home / "app-packs"
+    if not root.is_dir():
+        return []
+    values = []
+    for state in sorted(root.iterdir()):
+        install_path = state / "install.json"
+        lock_path = state / "app.lock"
+        if not install_path.is_file() or not lock_path.is_file():
+            continue
+        try:
+            install = json.loads(install_path.read_text(encoding="utf-8"))
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            if not isinstance(install, dict) or not isinstance(lock, dict):
+                continue
+            if pack_id and lock.get("pack_id") != pack_id:
+                continue
+            runtime_path = state / "runtime.json"
+            runtime = (
+                json.loads(runtime_path.read_text(encoding="utf-8"))
+                if runtime_path.is_file()
+                else None
+            )
+            pack_path = Path(str(install.get("pack_path") or "")).resolve()
+            levels = ["packed", "installed"]
+            if pack_path.is_dir() and (pack_path / "app.lock").is_file():
+                levels = PackRuntime(pack_path, hermes_home=home).evidence_levels(state.name)
+            values.append(
+                {
+                    "instance": state.name,
+                    "pack_id": lock.get("pack_id"),
+                    "pack_version": lock.get("pack_version"),
+                    "entry": lock.get("manifest", {}).get("entry"),
+                    "entry_profile": (
+                        f"{state.name}--{lock.get('manifest', {}).get('entry')}"
+                    ),
+                    "entry_base_url": (
+                        runtime.get("entry_base_url")
+                        if isinstance(runtime, dict)
+                        else None
+                    ),
+                    "evidence_levels": levels,
+                    "fresh_instance": install.get("fresh_instance") is True,
+                    "configured": isinstance(runtime, dict),
+                }
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return values
+
+
+def _runtime_api_key(instance: str) -> tuple[str, str]:
+    home = Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser().resolve()
+    state = ensure_within(home / "app-packs" / instance, home / "app-packs")
+    lock = json.loads((state / "app.lock").read_text(encoding="utf-8"))
+    runtime = json.loads((state / "runtime.json").read_text(encoding="utf-8"))
+    entry = str(lock["manifest"]["entry"])
+    profile = home / "profiles" / f"{instance}--{entry}"
+    key_env = str(runtime.get("entry_gateway_key_env") or runtime["gateway_key_env"])
+    values = {}
+    for line in (profile / ".env").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+    key = values.get(key_env, "")
+    if not key:
+        raise ValueError(f"entry Gateway credential is unavailable for instance: {instance}")
+    return str(runtime["entry_base_url"]), key
+
+
+def _trace_visibility(events: list[dict[str, Any]]) -> str:
+    if not events:
+        return "unobserved_collaboration_possible"
+    started = {
+        str(event.get("call_id"))
+        for event in events
+        if event.get("event") == "profile_call.started"
+    }
+    finished = {
+        str(event.get("call_id"))
+        for event in events
+        if event.get("event") in {"profile_call.completed", "profile_call.failed"}
+    }
+    return "complete_trace" if started and started <= finished else "partial_trace"
+
+
 def _pack_summary(pack: AppPack) -> dict[str, Any]:
     return {
         "id": pack.manifest.id,
@@ -110,8 +202,12 @@ def _pack_summary(pack: AppPack) -> dict[str, Any]:
         "agents": pack.manifest.model_dump(mode="json")["agents"],
         "public_api": pack.manifest.public_api.model_dump(mode="json"),
         "state_policy": pack.manifest.state_policy,
+        "state_compatibility": pack.manifest.state_compatibility,
+        "allowed_calls": pack.manifest.allowed_calls,
+        "collaboration": pack.manifest.collaboration,
         "cases": pack.manifest.cases,
         "revision": build_definition_snapshot(pack)["revision"],
+        "evidence_levels": ["packed"],
     }
 
 
@@ -127,9 +223,65 @@ async def overview():
                     continue
     return {
         "packs": packs,
+        "instances": _installed_instances(),
         "designs": store.list_designs(),
         "experiments": store.list_experiments(),
     }
+
+
+@router.get("/packs/{pack_id}/workspace")
+async def pack_workspace(pack_id: str):
+    try:
+        pack = _pack(pack_id)
+        instances = _installed_instances(pack_id)
+        sessions: list[dict[str, Any]] = []
+        session_discovery = {
+            "status": "unavailable",
+            "reason": "No configured runtime instance was discovered.",
+        }
+        selected = next(
+            (item for item in instances if item.get("configured")),
+            None,
+        )
+        if selected:
+            try:
+                base_url, api_key = _runtime_api_key(str(selected["instance"]))
+                sessions = await HermesHTTPClient(base_url, api_key).sessions(limit=20)
+                session_discovery = {
+                    "status": "available",
+                    "instance": selected["instance"],
+                }
+            except Exception as exc:
+                session_discovery = {
+                    "status": "unavailable",
+                    "reason": str(exc),
+                    "instance": selected["instance"],
+                }
+        cases = []
+        for relative in pack.manifest.cases:
+            case, digest = load_case(pack.root / relative)
+            cases.append({**case.model_dump(mode="json"), "hash": digest})
+        releases_root = atelier_root() / "releases"
+        releases = (
+            [
+                {"path": str(path), "name": path.name}
+                for path in sorted(releases_root.glob(f"{pack_id}-*"))
+                if (path / "app.lock").is_file()
+            ]
+            if releases_root.is_dir()
+            else []
+        )
+        return {
+            "pack": _pack_summary(pack),
+            "instances": instances,
+            "sessions": sessions,
+            "session_discovery": session_discovery,
+            "designs": store.list_designs(),
+            "cases": cases,
+            "releases": releases,
+        }
+    except Exception as exc:
+        raise _error(exc) from exc
 
 
 @router.post("/designs", status_code=201)
@@ -182,7 +334,42 @@ async def ingest_trace(event: dict[str, Any]):
 
 @router.get("/sessions/{session_id}/traces")
 async def session_traces(session_id: str):
-    return {"items": store.traces(session_id)}
+    items = store.traces(session_id)
+    return {
+        "items": items,
+        "visibility": _trace_visibility(items),
+        "notice": (
+            "Only visible profile_call events are shown. Native delegation, Kanban, MCP, "
+            "or other collaboration may be unobserved."
+        ),
+    }
+
+
+@router.post("/instances/{instance}/attest")
+async def attest_instance(instance: str):
+    try:
+        return _runtime(instance).attest(instance=instance)
+    except Exception as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/instances/{instance}/live-probe")
+async def live_probe_instance(instance: str):
+    try:
+        return _runtime(instance).live_probe(instance=instance)
+    except Exception as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/instances/{instance}/cases")
+async def run_instance_cases(instance: str, request: CaseRunRequest):
+    try:
+        return _runtime(instance).run_cases(
+            instance=instance,
+            case_id=request.case_id,
+        )
+    except Exception as exc:
+        raise _error(exc) from exc
 
 
 @router.post("/experiments", status_code=201)
@@ -266,7 +453,8 @@ async def release(pack_id: str, request: ReleaseRequest):
     try:
         pack = _pack(pack_id)
         destination = atelier_root() / "releases" / f"{pack_id}-{pack.manifest.version}"
-        return release_pack(pack, destination, git_revision=request.git_revision)
+        result = release_pack(pack, destination, git_revision=request.git_revision)
+        return {**result, "evidence_levels": ["packed"]}
     except Exception as exc:
         raise _error(exc) from exc
 
