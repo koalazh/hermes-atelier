@@ -61,7 +61,8 @@ contracts: []
 - `allowed_calls` 的来源和目标必须已声明，不能自调用或重复；
 - `public_api` 当前只接受 Hermes 原生 OpenAI 兼容端点；
 - Manifest 任意深度都禁止 Workflow 关键词；
-- Case 与 Contract 必须存在且不能逃逸 Pack 根目录。
+- Case 与 Contract 必须存在、不能重复且不能逃逸 Pack 根目录；Case 必须通过完整 schema/Memory Policy/Workflow key 校验，Contract 必须是 JSON object；
+- `public_api.output_contract` 必须是 Pack 内相对路径，并已列入 `contracts`。
 
 ## 状态策略
 
@@ -83,7 +84,7 @@ Pack 永远只引用 `host`、`expert` 之类的逻辑 ID。安装时 Consumer �
 
 ## 发布过滤
 
-Release 递归排除 `.env` 及私有变体、`MEMORY.md`、`USER.md`、`local/`、Sessions、Logs、Trace、PID、bytecode、Atelier 数据和旧 `app.lock`，保留只有占位符的 `.env.example`。Pack 禁止 symlink；发布物再次扫描私钥和 API Key 形状。Definition Snapshot 哈希注入 Plugin 和生成 wrapper 后的每个交付文件。若使用 `profile_call`，Release 只把该 Plugin 注入有出边的调用方 Distribution。
+Release 递归排除 `.env` 及私有变体、`MEMORY.md`、`USER.md`、`local/`、Sessions、Logs、Trace、PID、bytecode、Atelier 数据和旧 `app.lock`，保留只有占位符的 `.env.example`。Pack 禁止 symlink；发布物再次扫描私钥以及常见 Cloud/API credential 赋值形状。Release 先在同一父目录的临时 staging 中完成复制、注入、验证、Secret 扫描和 lock 生成，全部成功后才原子改名为目标目录；失败不会留下半成品目标。Definition Snapshot 哈希注入 Plugin 和生成 wrapper 后的每个交付文件。若使用 `profile_call`，Release 只把该 Plugin 注入有出边的调用方 Distribution。
 
 Git checkout 中的 Pack 必须先提交；Release 将 commit/tag 解析为完整 commit，并拒绝 Pack 路径的 tracked/untracked 漂移。非 Git 目录使用完整 source content SHA-256 provenance，不能写任意 revision 字符串。
 
@@ -95,4 +96,4 @@ uv run atelier cases apps/mini-voc
 uv run atelier release apps/mini-voc /tmp/mini-voc-release --git-revision HEAD
 ```
 
-Validator 验证结构和边界，不证明 SOUL 质量、模型行为或生产可用性。Release 安装后使用 `./app attest --instance <id>` 校验实际文件/模型/入口，使用 `./app cases --instance <id>` 在独立 Session 中执行全部 Cases。真实模型结果仍需人工审阅。
+Validator 验证结构和边界，不证明 SOUL 质量、模型行为或生产可用性。Release 安装后使用 `./app attest --instance <id>` 校验实际文件/模型/入口，使用 `./app cases --instance <id>` 在独立 Session 中执行全部 Cases。Hermes 安装会把 `distribution.yaml` 改写为安装回执，configure 会改写 `config.yaml`；wrapper 在 `runtime.json` 中记录这两类显式变换的实际 hash 和变换策略，其他 Distribution 资产必须继续直接匹配 `app.lock`。真实模型结果仍需人工审阅。

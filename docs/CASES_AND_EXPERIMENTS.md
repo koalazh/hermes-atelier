@@ -28,6 +28,8 @@ human_review: 应拒绝无测量支持的数字，并给出有源码证据的更
 
 业务评分应通过应用自己的 evaluator seam 或人工反馈实现，不应不断把业务字段塞进 Atelier 核心。
 
+`initial_state` 是运行输入，不是 Workflow：Case runner 和 Experiment 会把它作为 JSON 上下文加入 Trial instructions，由 Agent 在回答前读取；空对象不添加额外上下文。它不能包含步骤、路由或工具编排字段。
+
 ## Memory Policy
 
 - `clean`：Trial 使用新的 Session，不传长期 Memory scope；
@@ -72,4 +74,6 @@ Reviewer 不能：
 
 ## 候选改动
 
-Draft 只生成候选目录。候选采用时应进入显式 Git branch/worktree，展示 Diff，重新运行相同或明确版本化的 Cases，并由开发者决定是否合并。候选 Experiment 必须同时声明 baseline Pack revision 和 baseline Case hash；Case hash 变化会被拒绝，并要求作为新的评价条件单独运行，不能和 Profile 变化合并成“改进”。Atelier 不对当前工作树做隐式 `git apply`。
+Draft 只生成候选目录。候选采用时应进入显式 Git branch/worktree，展示 Diff，重新运行相同或明确版本化的 Cases，并由开发者决定是否合并。Atelier 不对当前工作树做隐式 `git apply`。
+
+候选 Experiment 必须声明 `branch`、Git worktree 根目录、`commit`、`baseline_commit`、`baseline_source_revision` 和 `baseline_case_hash`。Atelier 不信任这些自报值：运行前会要求 worktree 干净，核对实际 branch/HEAD、baseline 的规范 commit 与祖先关系、runtime attestation 的 Git provenance，并从 Git tree 重新计算 baseline Pack revision、读取 baseline Case、计算实际 Diff。不存在的 worktree、修改过的 Case、伪造 revision 或与已安装 runtime 不同的 commit 都会被拒绝。Case 变化必须作为新的评价条件单独运行，不能和 Profile 变化合并成“改进”。

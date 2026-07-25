@@ -38,6 +38,8 @@ export HERMES_APP_API_KEY='use-a-long-random-secret'
 
 唯一入口使用 `--gateway-port`，其余 Agent 再连续分配。只将唯一入口 Profile 端口加入 ingress；其他端口保持 loopback 和 API Key 认证。
 
+安装前后的完整性校验以 `app.lock` 为根。Hermes 原生 install 会将 `distribution.yaml` 规范化为带物理 Profile 名、来源和安装时间的回执，configure 会改写 `config.yaml`；wrapper 只允许这两类明确的运行时变换，并把变换策略与结果 hash 写入实例 `runtime.json`。SOUL、Skills、Plugins 等资产始终必须直接匹配 release，`attest` 也会重新核验当前文件，不能用修改后的运行状态自我重设基线。
+
 ## 原生 Hermes 等价命令
 
 Wrapper 不拥有生命周期。其关键动作等价于：

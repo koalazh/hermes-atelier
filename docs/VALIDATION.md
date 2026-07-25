@@ -73,22 +73,26 @@ Hermes 0.19.0 Dashboard 在 loopback `19610` 上进行真实浏览器验收。�
 
 release wrapper 现在提供 `attest` 和 `cases`：前者同时核验 `app.lock`、已安装 Profile 资产、逻辑映射、模型与入口；后者直接调用 Hermes `/v1/runs`，每个 Case 使用独立 Session，落实 clean/session-only/retained 策略，收集临时 Pack-local Trace 并执行调用、输出及可选 JSON Contract 断言，不依赖 Dashboard 或 Studio API。`update` 的 smoke 使用同一 Case runner，失败时恢复旧 release。
 
-最终隔离运行使用 DeepSeek `deepseek-v4-flash`，Secret 只从权限为 `0600` 的临时 Profile `.env` 导入进程环境。Mini VOC release `0f2b19e7…` attestation 通过，4 个 Case 全部通过：
+第二轮 Completion Challenge 进一步暴露五类信任边界：运行态证明可被自写 hash 重设基线、候选 Git 元数据由调用方自报、Secret 扫描与失败清理不完整、Case/Contract/`initial_state` 合同未完全落地，以及 wrapper `instance` 可逃逸状态根。修复后，非变换 Distribution 资产始终直接匹配 `app.lock`；Hermes 安装回执和 configure 配置作为两类显式变换记录并复验。候选必须绑定干净真实 worktree、branch/HEAD、祖先 baseline、Git tree 重新计算的 Pack/Case 和 runtime provenance。Release 在 staging 中完成通用 credential 扫描后原子发布；Case/Contract/输出 Contract、`initial_state` 和所有实例路径都增加了确定性回归。
 
-- `clarify`：Run `run_7f52b365…`，0 条调用 Trace；
-- `product`：Run `run_65a305db…`，2 条 Trace，命中 `PRD-LOGIN-17`；
-- `cross-domain`：Run `run_46a8187e…`，4 条 Trace，同时调用 Product 与 Transaction；
-- `expert-failure`：Run `run_e4d84f68…`，2 条 Trace，未把专家不可用解释为订单状态。
+最终隔离运行使用 DeepSeek `deepseek-v4-flash`，Secret 只从权限为 `0600` 的临时 Profile `.env` 导入进程环境。Mini VOC release `d2f65838…` attestation 通过，4 个 Case 全部通过：
+
+- `clarify`：Run `run_b9e4f374…`，0 条调用 Trace；
+- `product`：Run `run_d7e365ed…`，2 条 Trace，命中 `PRD-LOGIN-17`；
+- `cross-domain`：Run `run_ef185e4e…`，4 条 Trace，同时调用 Product 与 Transaction；
+- `expert-failure`：Run `run_2f3df99a…`，2 条 Trace，未把专家不可用解释为订单状态。
 
 Hermes 0.19 的主 Agent Run 接口不提供 Pack 可声明的结构化响应参数。真实运行中，模型虽满足业务断言，仍可能为严格 JSON 添加代码围栏或尾注。因此 Mini VOC 按原需求允许的“结构化或半结构化”边界收敛为“已知 / 不确定 / 下一步”语义约束，不虚假声明 JSON Schema；通用 runner 的 JSON Contract 校验仍有确定性回归覆盖。
 
-Project Defense 最终 release `a8ffd59e…` attestation 通过。`evidence-gap` 最新 Run `run_84eb4cc5…` 产生 2 条 Trace，Source 调用、`p99` 和两项禁造断言全部通过；同轮完整 Case 运行中的 `architecture`（Run `run_b4794f58…`）与 `coach-only`（Run `run_7c537418…`）也通过。一次模型输出曾正确拒绝无证据数字但漏写指标名，Case 因此暴露失败；Host 合同补充“挑战定量主张时复述指标名”后复验通过，没有降低断言。
+Project Defense 最终 release `5a57a137…` attestation 通过。`evidence-gap` Run `run_55fb244b…` 产生 2 条 Trace，Source 调用、`p99` 和两项禁造断言全部通过；同轮 `architecture`（Run `run_cd25bb24…`，4 条 Trace）与 `coach-only`（Run `run_3c4f0b74…`，0 条 Trace）也通过。一次模型输出曾正确拒绝无证据数字但漏写指标名，Case 因此暴露失败；Host 合同补充“挑战定量主张时复述指标名”后复验通过，没有降低断言。
 
 Studio Experiment `32de1de538104fd58c85c3ef2486ad1d` 不再接受调用方自报 endpoint 或 model。它从已安装实例取得已验证 attestation，冻结 Pack revision `a8ffd59e…`、source revision `3c859325…`、Case hash 与模型指纹，并在 Trial 前后复验；入口 Run `run_b23b4540…` 收集 4 条 Trace，四项断言全部通过。候选若缺少 baseline revision/hash 或修改 Case，会在执行前被拒绝。
 
+真实 Hermes 还确认 install 会重写 `distribution.yaml` 的物理名称、来源和安装时间。基于该行为增加安装回执变换策略后，Mini VOC 对同一 `d2f65838…` release 执行 `app update`，完整经历停止、重装、重配、重启和 smoke，随后 attestation 再次通过；这正向覆盖了此前因回执时间变化导致的更新失败。
+
 ## 最终门禁
 
-最终结果：100 个 pytest 全部通过；Ruff、`node --check plugin/atelier/dashboard/dist/index_v2.js`、`uv build`、`git diff 117f4d2..HEAD --check` 与两个 Pack 的 validate/release 通过。release 拒绝 symlink、Secret 形状和不安全状态文件，wrapper 可执行且 Definition Snapshot 覆盖全部 33/37 个交付文件。仓库 Secret 形状与私钥文件扫描无命中；本任务使用的 19700–19710 运行服务和 launchd 条目已清理。用户原有 Dashboard 未停止。
+最终结果：112 个 pytest 全部通过；Ruff、两个 Dashboard JavaScript 文件的 `node --check`、`uv build`、`git diff 117f4d2..HEAD --check` 与两个 Pack 的 validate/release 通过。release 拒绝 symlink、Secret/credential 形状和不安全状态文件，wrapper 可执行且 Definition Snapshot 覆盖全部 33/37 个交付文件。仓库 Secret 形状与私钥文件扫描无命中；本任务使用的 19800–19806 运行服务和 launchd 条目已清理。用户原有 Dashboard 未停止。
 
 ## 已知限制
 
