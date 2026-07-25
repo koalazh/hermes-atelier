@@ -1,51 +1,63 @@
-# Hermes Atelier V1 项目说明
+# Hermes Atelier V2 项目说明
 
-## 项目立意
+## 最终解决的问题
 
-Hermes Atelier 为开发者提供一个克制的本地空间：把业务意图转换成完整 Hermes Agents，观察真实跨 Profile 协作，从证据诊断问题，并且只在明确批准后应用可审查修改。
+Hermes 已经提供 Profile、Session、Run、Memory、Gateway、Plugins、Kanban 和 Dashboard。Atelier 只补足多 Profile 应用的开发闭环：多轮设计、真实协作观察、可复现 Case/Experiment，以及独立 App Pack 交付。
 
-它是 Atelier 而不是 AgentHub，因为它不拥有通用 Registry、调度器、远程 Mesh、租户模型或生产控制面。一个应用仍然只是仓库中的一组原生 Hermes Profile Distributions，执行环境始终是 Hermes。
+Atelier 的价值不是“让应用运行”，而是帮助开发者回答：目标是否对齐、Profile 边界是否有理由、真实调用发生了什么、不同定义和 Memory 条件是否可比较、交付物能否脱离 Studio 安装。
 
-## 为什么 Builder 是 Skill 驱动的 Hermes Profile
+## 为什么不是 AgentHub
 
-意图对齐、边界发现和 Profile 设计需要 Agent 判断。若由 Python 模板完成，这套模板会逐渐变成固定角色目录和 Workflow 生成器。Builder 默认单 Profile，并为每次拆分记录具体隔离理由；它本身也使用 Hermes 原生 SOUL、Skill、Memory、Session 与工具。
+AgentHub 需要通用 Registry、远程 Agent 发现、租户/权限模型、调度、服务治理和生产控制面。Atelier 不拥有这些。应用就是一组原生 Hermes Profile Distributions 和业务资产；远程部署与组合由 Consumer 自己的 Web、后端、Workflow 或 Agent 完成。
 
-## 为什么仍需要统一 Web UI
+## 为什么不参与发布应用 Runtime
 
-开发闭环需要一个位置完成草稿批准、真实父子 Runs 查看、Trace 证据比较、候选 Diff 审查与同场景 Replay。Atelier Tab 只增加这些开发操作。Hermes Dashboard 继续拥有 Profile 管理、Config、密钥、Skills、MCP、Sessions、Chat、日志与 Gateway 管理。
+V1 让 `atelier_call` 依赖 Atelier Run/SQLite，并由 Endpoint Registry、端口分配、PID 和 Dashboard 后台任务管理 Profile。结果是停止 Studio 会改变应用能力，且与 Hermes 原生生命周期重复。
 
-## 为什么只有一个 atelier_call
+V2 发布应用只依赖 Hermes 和 Pack。Atelier Trace 是可选观测，故障或删除不能改变业务调用结果。
 
-任意 `curl` 无法建立可信的调用者身份以及父子 Session/Run 关系。`atelier_call` 校验当前应用白名单并记录真实调用边界，但不会替 Agent 选择专家、决定顺序、判断证据、聚合结果或执行业务降级。
+## 为什么需要 App Pack
 
-## 与 Hermes Self-Evolution 的边界
+单个 Profile Distribution 不足以表达多 Profile 应用的逻辑 Agent、权限边界、公开入口、状态策略、Cases 和 Contracts。App Pack 是克制的版本化目录约定，不是包管理平台，也不包含运行态。
 
-Hermes Self-Evolution 与 Atelier Review 是两条不同边界。Reviewer 只读一次冻结、收敛范围的证据包，不能修改应用、Memory、场景、评价标准或正式 Profiles。Builder 可以生成路径受限的候选 Patch，但只有后端批准状态才能应用，且改进结论必须通过原场景 Replay 验证。
+## 为什么 profile_call 独立于 Studio
 
-## 稳定边界与 Agent 自主空间
+跨 Profile HTTP 是应用协作能力，不是开发 UI 能力。`profile_call` 只做逻辑目标解析、权限校验、目标 Hermes Run 和元数据返回；它不导入 Atelier、不读 SQLite、不解析 Atelier Session，也不负责路由、并行、聚合、业务重试或降级。
 
-Atelier 控制 Profile 身份、应用成员、调用白名单、loopback 端点、运行凭据、Session/Run 关联、Trace、文件范围、明确批准、进程健康与失败状态。
+## 所有权
 
-Agent 控制业务理解、调查、任务拆解、是否委派、委派对象与顺序、工具使用、证据充分性和最终输出。目标、对齐方案、Profile 边界、验收场景、版本、Trace、Review 与 Proposal 可以外部化；业务步骤、路由谓词、fan-out、aggregate、judge 和业务重试不能进入 Atelier 核心或 `app.yaml`。
+| 组件 | 拥有 |
+| --- | --- |
+| Hermes | Profile、Gateway、Session、Run、Memory、Plugins、模型、工具与进程生命周期 |
+| Atelier Studio | Design/PLAN/Draft 开发体验、真实 Trace 索引、Case/Experiment、Release 验证 |
+| App Pack | 逻辑 Agent、Distributions、权限边界、Public API、状态策略、Cases、Contracts |
+| Consumer | 实例名、Secret、端口、ingress、运行映射、用户状态、部署和业务组合 |
 
-## 明确非目标
+## V1 被证明错误的抽象
 
-V1 不提供 multiplex Gateway、Workflow DSL/编辑器、通用 Agent Registry/Mesh、异步任务平台、自动自进化、自动发布、多租户、RBAC、生产级 Trace、自研 Memory/Session/Runtime/模型路由、业务 UI、Marketplace 或 Hermes 核心补丁。
+- Atelier Endpoint/PID Registry 作为运行事实源；
+- `task_id == session_id` 的 Atelier 专属调用协议；
+- 一次性 Build 和弱化的一次性 Playground；
+- 单个 Run Review 后直接 Proposal/Replay；
+- Dashboard 后台任务作为隐式 Runtime；
+- 统一模型注入和所有业务 Profile 强制安装 Atelier Plugin；
+- 对当前工作树直接 `git apply`。
 
-## 可删除策略
+旧代码保留为迁移期回归证据，不再由 V2 Plugin manifest、CLI 或 Dashboard 活动入口引用。
 
-如果 Hermes 提供可靠的原生等价能力，应删除 Atelier 对应接缝，不为兼容继续保留重复抽象。即使工作台收缩，具体应用资产仍可继续作为原生 Hermes Profiles 存在。
+## 应贡献给 Hermes 上游的能力
+
+- Profile-scoped Plugin registry，使 multiplex 能安全加载不同业务 Plugins；
+- 多 Profile 应用分组与公开/内部端点语义；
+- 原生跨 Profile 调用及标准 Trace Context；
+- Session/Run 的 Experiment 元数据挂接；
+- Distribution 更新后的标准 smoke hook。
 
 ## Kill / Pivot 条件
 
-出现以下情况时停止扩张：
-
-- Hermes 原生提供可靠的跨 Profile 调用、Trace、应用分组或 Review；
-- `atelier_call` 不再需要；
-- 第三个应用要求在 Atelier 核心加入业务特判；
-- Builder 输出长期需要大规模人工重写；
-- Reviewer 建议无法通过重复场景稳定验证；
-- 开发者更愿意直接使用 Hermes Dashboard 和 Profiles；
-- Atelier 维护成本超过其调试价值。
-
-触发后依次优先：删除重复模块、收缩为一个 Hermes Plugin、收缩为 Builder Skill、把通用能力贡献给 Hermes 上游，并保留仍有价值的具体业务应用。
+- Hermes 原生覆盖 Design、Trace、Experiment 或 App Group，Atelier 应删除重复模块；
+- 第三个应用迫使核心增加业务特判，停止扩张并回退到应用资产；
+- Builder Draft 长期不能通过 Pack Validator，收缩为 PLAN/Skill；
+- Trace 索引被当成业务调用前置条件，立即拆除该依赖；
+- 开发者直接使用 Hermes 和 Git 更高效，收缩为 App Pack Validator/Release 工具；
+- 维护成本高于调试和交付价值，优先贡献通用能力到 Hermes 上游。

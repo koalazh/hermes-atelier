@@ -1,55 +1,48 @@
-# Builder、Reviewer 与批准边界
+# Builder、Drafter 与 Reviewer 边界
 
-## Builder 的职责
+## 多轮设计
 
-`atelier-builder` 在生成任何应用之前，先调查用户目标、输入、预期输出、工具、数据、Memory 归属、安全边界与验收证据。默认优先使用单 Profile；只有工具或数据权限、长期知识、工作目录、资源、故障隔离、独立演进、复用价值或显著上下文质量差异成立时才拆分。
+Atelier Builder 是完整 Hermes Profile，但规划阶段是只读的。Studio 为每个 Design 创建稳定 Hermes Session，调用 `/api/sessions/{id}/chat`，并在后续轮次复用同一 Session。开发者可以回答问题、纠正目标、要求更简单的边界或补充验收条件。
 
-演示需要造成的拆分必须明确标记，并说明更简单的单 Agent 方案。Builder Skill 不固定角色模板、拓扑、模型、Prompt、Agent 数量、调用次数或业务流程。
-
-## BUILD.md
-
-每次 Build 只对应一个草稿目录和一份 `BUILD.md`。它包含：
-
-- Original Request；
-- Aligned Goal；
-- Users and Inputs；
-- Expected Output；
-- Profile Boundaries；
-- Tools and Data；
-- Memory and Skill Ownership；
-- HTTP Collaboration；
-- Observability Needs；
-- Acceptance Scenarios；
-- Missing Real Integrations；
-- Risks；
-- Status。
-
-这些标题作为 Builder 与后端之间的稳定契约保留英文，内容可以使用中文。`BUILD.md` 是目标和状态锚点，不是由 Atelier 执行的步骤图。
-
-## Build 批准
-
-Builder 可以在缺失信息会改变目标或安全边界时提出聚焦问题。它为每个 Profile 创建完整原生 Distribution，并在 `AWAITING_APPROVAL` 停止。自然语言中的“用户已经同意”不会改变后端状态。
-
-批准时，后端会验证草稿中恰好有一个应用，拒绝 symlink 和密钥文件，校验不含 Workflow DSL 的 `app.yaml`，然后转入正式目录、安装 Profiles、创建端点、启动 Gateways，并登记内容派生的 definition revision。
-
-若 Profile 安装或启动失败，后端会停止本次已经启动的 Gateways。清理成功后，正式目录移到忽略提交的诊断目录并删除失败注册；若清理本身失败，则保留应用和端点控制状态，避免产生 Atelier 无法管理的孤儿进程。
-
-## Reviewer 与 Proposal
-
-`atelier-reviewer` 只读冻结 Trace Bundle、用户反馈、场景、应用定义以及相关 SOUL/Skills。它不能读取真实密钥、无关 Memory 或整个用户目录，也不能修改应用、Memory、场景或自己的评价标准。
-
-Reviewer 输出必须按以下顺序包含：
+Builder 输出必须以以下状态之一结束：
 
 ```text
-OBSERVATIONS
-EVIDENCE
-HYPOTHESES
-PROPOSED_CHANGES
-RISKS
-VALIDATION_PLAN
-CONFIDENCE
+DESIGN_STATUS: NEEDS_INPUT
+DESIGN_STATUS: PLAN_READY
 ```
 
-完成 Review 后，Builder 在另一个隔离草稿中只生成 `candidate.patch`。后端拒绝空 Patch、损坏 Patch、跨应用路径、密钥、运行态、Atelier 核心、Builder 或 Reviewer 路径。即使 Patch 路径合法，若它编码固定业务流程或超出证据，用户仍应拒绝。
+缺失信息会改变目标、安全、数据或验收时使用 `NEEDS_INPUT`；其余技术取舍由 Builder 完成。`PLAN_READY` 只是可执行设计，不会写文件。
 
-Patch 应用需要显式批准和 dry-run。若后续 Profile 更新失败，后端会反向应用 Patch、恢复应用注册并重装原始受影响 Profiles；任何回滚不完整都会明确记录为 `patch_apply_failed`，而不会宣称成功。
+## 拆分原则
+
+默认优先单 Profile。只有工具/数据权限、长期知识、工作目录、资源、故障隔离、独立演进、复用或显著上下文差异成立时才拆分。为了演示造成的拆分必须明确标记，并给出更简单方案。
+
+PLAN 至少覆盖目标、用户与输入、输出、逻辑 Agent 边界、工具与数据、Memory、协作、安全、Cases、Contracts、缺失真实集成、风险和验收证据。它不能把业务步骤编码进 Atelier 核心。
+
+## 权限切换
+
+规划 Profile 的 config 默认禁用 terminal、file、code_execution、session_search、memory 和 delegation。它不能借规划请求写仓库、搜索其他 Session 或委派有副作用的 Agent。
+
+只有开发者显式触发 `Generate Draft`，Studio 才把已批准 PLAN 发送给独立 `atelier-drafter` Profile。Drafter 只被允许写一个指定 Draft 目录，且必须生成恰好一个 V2 App Pack。后端随后执行相同的 AppPack Validator；非法路径、Workflow key、缺失 Distribution 或多个 Pack 都会失败。
+
+Draft 不等于采纳、安装、启动、提交或批准。失败 Draft 不得进入正式应用。
+
+## 候选与 Git
+
+需要继续演进的 Draft 或人工改动应进入明确 Git branch/worktree。Atelier 记录候选 branch、worktree 和 diff metadata，但不对当前工作树执行隐式 Patch。
+
+候选必须展示 Diff，以冻结 Case/Experiment 验证，并由开发者决定是否合并。Git 是定义历史事实源；Atelier 不建立 Proposal 数据库代替 Git。
+
+## Reviewer
+
+`atelier-reviewer` 只读取一个完整、冻结且已经结束的 Experiment。它输出观察、证据、假设、不确定性、风险和验证建议，不修改 App、Case、Memory、模型或评价标准。
+
+Reviewer 不能把一次成功输出称为“优化完成”，不能只选择有利 Trial，不能依据缺失 Trace 推断没有调用，也不能把模拟数据描述为生产事实。任何改进建议都必须回到 Git 候选和新 Experiment。
+
+## 失败语义
+
+- Hermes Session 创建或 chat 失败：Design 保留此前对话证据并报告失败；
+- Builder 未给出可识别状态：不允许进入 Draft；
+- Drafter Run 失败或产物不合法：状态为 Draft 失败，不触碰正式应用；
+- Reviewer Run 失败：Experiment 本体保持不变，可在修复外部条件后重试 Review；
+- Studio 存储失败：不得将未持久化结果伪装为已保存设计或评价。

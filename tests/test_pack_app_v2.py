@@ -65,13 +65,9 @@ def test_pack_install_and_configure_use_hermes_and_local_runtime_state(
         "customer-a--product",
     }
     mapping = json.loads(
-        (
-            home
-            / "profiles"
-            / "customer-a--dispatcher"
-            / "local"
-            / "app-runtime.json"
-        ).read_text(encoding="utf-8")
+        (home / "profiles" / "customer-a--dispatcher" / "local" / "app-runtime.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert mapping["current_agent"] == "dispatcher"
     assert mapping["agents"]["dispatcher"]["base_url"] == "http://127.0.0.1:9123"
@@ -152,3 +148,55 @@ def test_pack_update_removes_deleted_profile_and_preserves_consumer_state(
     assert "CONSUMER_MARKER=keep" in (dispatcher / ".env").read_text()
     assert (dispatcher / "local" / "consumer.json").is_file()
     assert any("delete" in call and "customer-a--product" in call for call in fake.calls)
+
+
+def test_pack_update_smoke_failure_restores_old_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_pack = released_pack(tmp_path / "old")
+    home = tmp_path / "hermes"
+    fake = FakeHermes(home)
+    old = PackRuntime(old_pack, hermes_home=home, hermes_runner=fake)
+    old.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+    old.configure(
+        instance="customer-a",
+        model="test-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+
+    source = create_pack(tmp_path / "new-source")
+    import yaml
+
+    manifest_path = source / "app.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["agents"].pop("product")
+    manifest["allowed_calls"] = {}
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+    new_pack = tmp_path / "new-release"
+    release_pack(AppPack.load(source), new_pack)
+    runtime = PackRuntime(new_pack, hermes_home=home, hermes_runner=fake)
+    smokes = 0
+
+    def smoke_once(*_: object, **__: object) -> None:
+        nonlocal smokes
+        smokes += 1
+        if smokes == 1:
+            raise RuntimeError("new smoke failed")
+
+    monkeypatch.setattr(runtime, "_smoke", smoke_once)
+
+    with pytest.raises(RuntimeError, match="previous distributions restored"):
+        runtime.update(instance="customer-a")
+
+    mapping = json.loads(
+        (home / "profiles" / "customer-a--dispatcher" / "local" / "app-runtime.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert set(mapping["agents"]) == {"dispatcher", "product"}
+    assert (home / "profiles" / "customer-a--product").is_dir()

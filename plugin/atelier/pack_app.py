@@ -6,6 +6,9 @@ import json
 import os
 import shutil
 import subprocess
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -122,6 +125,27 @@ class PackRuntime:
         gateway_key_env: str,
         gateway_port: int,
     ) -> None:
+        self._configure(
+            self.lock,
+            instance=instance,
+            model=model,
+            model_base_url=model_base_url,
+            model_key_env=model_key_env,
+            gateway_key_env=gateway_key_env,
+            gateway_port=gateway_port,
+        )
+
+    def _configure(
+        self,
+        lock: dict[str, Any],
+        *,
+        instance: str,
+        model: str,
+        model_base_url: str,
+        model_key_env: str,
+        gateway_key_env: str,
+        gateway_port: int,
+    ) -> None:
         model_key = os.environ.get(model_key_env, "")
         gateway_key = os.environ.get(gateway_key_env, "")
         if not model or not model_base_url or not model_key:
@@ -130,13 +154,12 @@ class PackRuntime:
             raise RuntimeError("gateway API key must contain at least 16 characters")
         if not 1 <= gateway_port <= 65535:
             raise ValueError("gateway port is out of range")
-        if gateway_port + len(self.lock["agents"]) - 1 > 65535:
+        if gateway_port + len(lock["agents"]) - 1 > 65535:
             raise ValueError("gateway port range is out of range")
 
-        manifest = self.lock["manifest"]
+        manifest = lock["manifest"]
         agent_ports = {
-            agent_id: gateway_port + index
-            for index, agent_id in enumerate(self.lock["agents"])
+            agent_id: gateway_port + index for index, agent_id in enumerate(lock["agents"])
         }
         for agent_id, agent_port in agent_ports.items():
             profile = self._physical(instance, agent_id)
@@ -144,9 +167,7 @@ class PackRuntime:
             if not runtime.is_dir():
                 raise RuntimeError(f"Profile is not installed: {profile}")
             self.hermes_runner("-p", profile, "config", "set", "model.default", model)
-            self.hermes_runner(
-                "-p", profile, "config", "set", "model.provider", "custom:app_pack"
-            )
+            self.hermes_runner("-p", profile, "config", "set", "model.provider", "custom:app_pack")
             self.hermes_runner(
                 "-p",
                 profile,
@@ -178,8 +199,8 @@ class PackRuntime:
             )
             mapping = {
                 "schema_version": 1,
-                "pack_id": self.lock["pack_id"],
-                "pack_version": self.lock["pack_version"],
+                "pack_id": lock["pack_id"],
+                "pack_version": lock["pack_version"],
                 "instance": instance,
                 "current_agent": agent_id,
                 "agents": {
@@ -188,7 +209,7 @@ class PackRuntime:
                         "base_url": f"http://127.0.0.1:{agent_ports[logical]}",
                         "api_key_env": gateway_key_env,
                     }
-                    for logical in self.lock["agents"]
+                    for logical in lock["agents"]
                 },
                 "allowed_calls": manifest.get("allowed_calls", {}),
             }
@@ -203,9 +224,7 @@ class PackRuntime:
         (state / "runtime.json").write_text(
             json.dumps(
                 {
-                    "entry_base_url": (
-                        f"http://127.0.0.1:{agent_ports[manifest['entry']]}"
-                    ),
+                    "entry_base_url": (f"http://127.0.0.1:{agent_ports[manifest['entry']]}"),
                     "gateway_key_env": gateway_key_env,
                     "gateway_base_port": gateway_port,
                     "agent_ports": agent_ports,
@@ -219,6 +238,51 @@ class PackRuntime:
             + "\n",
             encoding="utf-8",
         )
+
+    def _smoke(
+        self,
+        lock: dict[str, Any],
+        *,
+        instance: str,
+        runtime: dict[str, Any],
+    ) -> None:
+        case = lock.get("smoke_case")
+        if not isinstance(case, dict) or not isinstance(case.get("input"), str):
+            return
+        key_env = str(runtime["gateway_key_env"])
+        entry = str(lock["manifest"]["entry"])
+        key = _env_values(
+            self.hermes_home / "profiles" / self._physical(instance, entry) / ".env"
+        ).get(key_env, "")
+        if not key:
+            raise RuntimeError("smoke Case cannot resolve the Gateway API key")
+        request = urllib.request.Request(
+            f"{runtime['entry_base_url']}/v1/chat/completions",
+            data=json.dumps(
+                {
+                    "model": self._physical(instance, entry),
+                    "messages": [{"role": "user", "content": case["input"]}],
+                }
+            ).encode(),
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+                "X-Hermes-Session-Id": f"pack-update-smoke-{instance}",
+            },
+            method="POST",
+        )
+        last_error: Exception | None = None
+        for _ in range(15):
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    payload = json.loads(response.read())
+                if payload.get("hermes", {}).get("failed") is True:
+                    raise RuntimeError(str(payload["hermes"].get("error") or "smoke failed"))
+                return
+            except urllib.error.URLError as exc:
+                last_error = exc
+                time.sleep(1)
+        raise RuntimeError(f"smoke Case failed: {last_error}")
 
     def _installed_lock(self, instance: str) -> dict[str, Any]:
         path = self._instance_state(instance) / "app.lock"
@@ -299,9 +363,17 @@ class PackRuntime:
                 )
             if restart:
                 self.gateway("start", instance=instance)
+                if runtime:
+                    refreshed = _load_json(runtime_path)
+                    self._smoke(self.lock, instance=instance, runtime=refreshed)
         except Exception as exc:
             rollback_errors: list[str] = []
             try:
+                if restart:
+                    try:
+                        self.gateway("stop", instance=instance)
+                    except Exception:
+                        pass
                 self._install_agents(old_lock, old_pack, instance=instance)
                 for added in sorted(new_agents - old_agents):
                     self.hermes_runner(
@@ -317,8 +389,21 @@ class PackRuntime:
                     json.dumps(old_install, indent=2, ensure_ascii=False) + "\n",
                     encoding="utf-8",
                 )
+                if runtime:
+                    self._configure(
+                        old_lock,
+                        instance=instance,
+                        model=str(runtime["model"]),
+                        model_base_url=str(runtime["model_base_url"]),
+                        model_key_env=str(runtime["model_key_env"]),
+                        gateway_key_env=str(runtime["gateway_key_env"]),
+                        gateway_port=int(runtime["gateway_base_port"]),
+                    )
                 if restart:
                     self.gateway("start", instance=instance)
+                    if runtime:
+                        restored = _load_json(runtime_path)
+                        self._smoke(old_lock, instance=instance, runtime=restored)
             except Exception as rollback_exc:
                 rollback_errors.append(str(rollback_exc))
             detail = f"Pack update failed: {exc}"

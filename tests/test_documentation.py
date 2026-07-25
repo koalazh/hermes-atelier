@@ -43,34 +43,33 @@ def test_every_human_document_contains_chinese() -> None:
 def test_readme_covers_user_and_developer_paths() -> None:
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     required = {
-        "环境要求",
-        "快速开始",
-        "工作台使用流程",
-        "示例应用",
-        "常用运维命令",
-        "本地数据与清理",
-        "开发与验证",
-        "故障排查",
-        "文档导航",
+        "核心路径",
+        "安装开发环境",
+        "验证与发布一个 Pack",
+        "更新语义",
+        "两个回归应用",
+        "Studio 配置",
+        "状态与安全",
+        "文档",
+        "已知边界",
     }
     for heading in required:
         assert f"## {heading}" in text
-    assert "tests/test_full_workflow.py" in text
-    assert "scripts/capability_test.py" in text
-    assert "AGENTS.md" in text
-    assert "(AGENTS.md)" in text
+    assert "profile_call" in text
+    assert "./app update" in text
+    assert "docs/MIGRATION_FROM_V1.md" in text
 
 
 def test_agents_guide_preserves_project_invariants() -> None:
     text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     required = {
-        "不得在 Atelier 核心编码业务流程",
-        "`atelier_call` 是唯一受 Atelier 观测的跨 Profile 调用边界",
+        "Atelier 是可删除的开发工坊",
+        "`profile_call` 是可选、独立于 Atelier 的应用 Plugin",
         "不修改 Hermes 核心源码",
-        "`.atelier/atelier.db` 是唯一 Atelier 状态事实源",
-        "真实密钥只能写入被忽略、权限为 `0600` 的运行态 Profile `.env`",
-        "uv run pytest -q tests/test_full_workflow.py",
-        "说明性正文与章节标题使用中文",
+        "Case 描述输入、状态、Memory Policy、通用结果断言和人工评审提示",
+        "真实密钥只能进入 Consumer 拥有、权限为 `0600` 的 Profile `.env`",
+        "uv run pytest -q",
+        "面向人的 README、`AGENTS.md` 和 `docs/**/*.md` 使用中文说明",
     }
     for rule in required:
         assert rule in text

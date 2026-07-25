@@ -26,6 +26,7 @@ FORBIDDEN_WORKFLOW_KEYS = {
 }
 RUNTIME_NAMES = {
     ".atelier",
+    ".DS_Store",
     ".env",
     "auth.json",
     "local",
@@ -61,9 +62,7 @@ class PublicAPI(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     protocol: Literal["openai"] = "openai"
-    endpoints: list[Literal["/v1/responses", "/v1/chat/completions"]] = Field(
-        min_length=1
-    )
+    endpoints: list[Literal["/v1/responses", "/v1/chat/completions"]] = Field(min_length=1)
     output_contract: str | None = None
 
 
@@ -79,6 +78,7 @@ class AppManifest(BaseModel):
     collaboration: list[str] = Field(default_factory=list)
     public_api: PublicAPI
     state_policy: Literal["stateless", "session_only", "caller_scoped"]
+    state_compatibility: Literal["preserve", "review_required", "reset_recommended"] = "preserve"
     cases: list[str] = Field(default_factory=list)
     contracts: list[str] = Field(default_factory=list)
     description: str | None = None
@@ -268,9 +268,9 @@ def release_pack(
             plugin_target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(plugin_source, plugin_target)
             distribution_manifest_path = distribution / "distribution.yaml"
-            distribution_manifest = yaml.safe_load(
-                distribution_manifest_path.read_text(encoding="utf-8")
-            ) or {}
+            distribution_manifest = (
+                yaml.safe_load(distribution_manifest_path.read_text(encoding="utf-8")) or {}
+            )
             owned = list(distribution_manifest.get("distribution_owned") or [])
             if "plugins/profile_call" not in owned:
                 owned.append("plugins/profile_call")
@@ -305,6 +305,15 @@ def release_pack(
         "agents": snapshot["agents"],
         "manifest": released.manifest.model_dump(mode="json"),
     }
+    if released.manifest.cases:
+        smoke = yaml.safe_load(
+            (destination / released.manifest.cases[0]).read_text(encoding="utf-8")
+        )
+        if isinstance(smoke, dict) and isinstance(smoke.get("input"), str):
+            lock["smoke_case"] = {
+                "id": str(smoke.get("id") or Path(released.manifest.cases[0]).stem),
+                "input": smoke["input"],
+            }
     (destination / "app.lock").write_text(
         json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )

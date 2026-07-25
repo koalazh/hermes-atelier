@@ -24,6 +24,7 @@ public_api:
   endpoints: [/v1/responses, /v1/chat/completions]
   output_contract: contracts/output.schema.json
 state_policy: session_only
+state_compatibility: preserve
 cases:
   - cases/clarify.yaml
   - cases/product.yaml

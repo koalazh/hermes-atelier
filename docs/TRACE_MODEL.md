@@ -1,60 +1,55 @@
-# Trace 数据模型
+# V2 Trace 数据模型
 
-## 三种不同作用域
+## Hermes 是运行事实源
 
-- **Hermes Session**：属于单个 Profile，保存该 Agent 的 transcript。
-- **Hermes Run**：属于单个 Profile 的一次执行。
-- **Atelier Run**：一次多 Profile 应用调用的关联信封，不合并 transcript，也不替代 Hermes 状态。
+- Hermes Session：单个 Profile 的对话身份和 transcript；
+- Hermes Run：单个 Profile 的一次异步执行；
+- `profile_call`：一次来源 Profile 到目标 Profile 的真实 HTTP 协作；
+- Atelier Trace：对 `profile_call` 事件的可选、脱敏、best-effort 开发索引。
 
-随机 Atelier Run ID 只用于一次 transcript 关联。需要稳定长期 Memory 时，使用独立的 `X-Hermes-Session-Key` 业务作用域，不能把 Atelier Run ID 当作长期记忆 Key。
+V2 没有 Atelier Root Run、Span Runtime 或合并 transcript。Studio 删除后，Hermes Session/Run 和发布应用仍然存在。
 
-## 核心实体
+## 关联字段
 
-Atelier 只保留五个核心实体：
+每次 `profile_call` 生成随机 `call_id` 和独立 `target_session_id=pc_<call-id>`，并保留：
 
-- `AtelierApp`：版本化应用注册；
-- `AtelierRun`：一次应用级调用；
-- `AtelierSpan`：一次被观测的跨 Profile 调用；
-- `AtelierEvent`：执行期间规范化、脱敏后的必要事件；
-- `AtelierReview`：针对一个或多个 Runs 的证据化评审。
+- `source` / `target` 逻辑 Agent；
+- `source_session_id`；
+- `target_session_id`；
+- `target_hermes_run_id`；
+- Hermes Plugin context 提供的可选 `task_id`；
+- started/completed/failed 状态、脱敏结果或错误。
 
-Endpoint、Build、Feedback 和 Proposal 行只支撑运行与批准闭环，不构成另一套 Agent Runtime。
+这些字段来自运行映射和真实 Hermes 响应。自然语言中声称的 Profile、Session 或 Run ID 不是可信身份。
 
-## Session ID 与父子关联
-
-Root Session ID 使用：
-
-```text
-at_<32-hex-run-id>_root
-```
-
-Child Session ID 使用：
+## 事件
 
 ```text
-at_<run-id>_<32-hex-span-id>
+profile_call.started
+profile_call.completed
+profile_call.failed
 ```
 
-解析器只接受以上格式，并进一步校验数据库中记录的来源 Profile、父 Span 和来源 Session。自然语言中的 Profile 或 Run ID 声明不具备可信身份。
+started 在目标 dispatch 前尝试上报；completed/failed 在目标真实终态后尝试上报。同一 `call_id` 关联一对事件。Studio 只保存必要索引，不复制目标完整 transcript、Memory、环境变量或工作目录。
 
-## 事件采集
+## Experiment 绑定
 
-Hermes 终态 Run 记录只有限期保留，因此 Atelier 在 Run 执行期间持续消费 SSE。事件脱敏后只写入一次 SQLite，不维护后台 JSONL 镜像。
+Experiment Trial 创建唯一来源 Session。断言只读取该 `source_session_id` 的 Trace，避免跨 Trial 污染。Trial 同时保存入口 Hermes Run ID、终态和输出；Trace 只是协作证据的一部分。
 
-主动导出时才创建冻结 Trace Bundle：
+`clean` 与 `session_only` 不传长期 scope；`retained` 将独立 `memory_scope` 作为 `X-Hermes-Session-Key` 传给入口 Run。Session ID 和长期 Memory scope 不能混为一谈。
 
-```text
-manifest.json
-events.jsonl
-sessions/
-feedback.json
-app-definition/
-result.md
-```
+## 降级与证据边界
 
-Bundle 只获取本次 Review 引用的 Sessions，不复制完整 Memory、密钥、环境变量、无关 Session 或工作目录内容。
+dispatch 前无法解析映射、授权目标或读取 Secret 时失败关闭。目标已经完成但 Trace Sink 不可用时，`profile_call` 返回真实业务结果并设置 `trace_degraded=true`。
 
-## 降级与停止
+因此：
 
-如果下游调用开始后事件持久化失败，Atelier 返回真实下游结果并标记 `trace_degraded`。如果授权或父子关系在 dispatch 前无法可靠建立，则调用失败关闭。
+- completed Trace 可证明该目标调用完成；
+- failed Trace 可证明尝试及其失败，但不能证明业务状态；
+- 没有 Trace 不能单独证明没有调用；
+- Trace 不是生产审计、分布式追踪或计费系统；
+- 模型输出引用的事实仍需检查目标工具证据。
 
-Hermes stop 响应只代表请求已发送；只有后续 terminal event/status 才能证明 Run 已取消。Atelier 不把 `stopping` 误报为 `cancelled`。
+## 脱敏与保留
+
+Trace 入口和 Studio Store 对 Authorization、常见 Secret assignment 和 Key 形状执行脱敏。`.atelier/v2/traces` 是可删除开发证据，默认不进入 Git 或 App Pack。需要长期审计时应使用 Consumer 自己的受控观测设施，而不是扩大 Atelier 所有权。

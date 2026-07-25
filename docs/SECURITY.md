@@ -1,33 +1,47 @@
-# 安全边界
+# V2 安全边界
 
 ## 信任模型
 
-Atelier V1 是面向可信本地仓库的开发 Plugin。Dashboard 与所有 Profile API Server 默认只绑定 `127.0.0.1`；启动脚本拒绝 `0.0.0.0`，文档也不提供公网部署方式。启用不可信 Plugin 时，不得把 Hermes Dashboard 暴露到公共网络。
+Atelier V2 面向可信本地开发仓库，不是操作系统沙箱、多租户控制面或生产安全边界。Hermes Gateway 与 Dashboard 默认只绑定 `127.0.0.1`。需要更强文件、进程和网络隔离时，应使用 Hermes 支持的隔离后端和 Consumer 基础设施。
 
-项目本地 `HERMES_HOME` 把 Hermes 状态与 `~/.hermes` 隔离，但它不是操作系统安全沙箱。需要更强文件、进程或网络隔离时，应使用 Hermes 支持的 Docker 等执行后端。
+## Secret 所有权
 
-## 密钥与浏览器边界
+真实模型 Key 和 Gateway API Key 只存在于 Consumer 进程环境以及 Hermes Profile `.env`。薄 wrapper 写 `.env` 后设置 `0600`，但不把 Secret 写入：
 
-API Key 只存在于 Git 忽略、权限为 `0600` 的 Profile `.env`。SQLite 只保存 host、port、status 和 PID，不保存 Profile API Key。浏览器响应只返回端点和缺失变量名，不返回值，也不会直接调用业务 Profile。
+- `app.yaml`、Distribution、Case、Contract 或 `.env.example`；
+- `app.lock`、`local/app-runtime.json` 或 Atelier Store；
+- Trace、错误、模型指纹、Dashboard 响应、文档或 Git。
 
-Authorization Header、符合密钥形状的字符串和常见 secret assignment 会从事件、摘要、反馈包、错误和 Builder 输入持久化中脱敏。真实密钥不得进入 `.env.example`、`app.yaml`、Distribution、Trace Bundle 或 Git 历史。
+命令行传递的是环境变量名，不是 Secret 值。`.env.example` 只能包含空值或明显占位符。
 
-## 路径与修改边界
+## 网络与身份
 
-所有 Profile 名称、Profile source、scenario、draft、Trace Bundle 和 Patch 路径都必须在声明根目录下解析。Build 拒绝 symlink 和运行态密钥文件。
+每个物理 Profile 使用独立 loopback Gateway 和 API Key。Pack 只有一个 `public` entry；内部 Profile 仍需认证，但不应加入外部 ingress。
 
-Proposal 只能修改 `apps/<current-app-id>/`，必须先展示完整 Diff、执行 dry-run 并等待明确批准。它不能修改其他应用、Atelier Plugin、Builder、Reviewer、`.hermes-runtime`、`.atelier`、`.env` 或 Hermes 核心。
+`profile_call` 从当前 Profile 的运行映射确定来源，校验 `allowed_calls`，并从目标声明的环境变量读取 Key。映射缺失、越权或 Secret 缺失时失败关闭，不能根据 Prompt 猜身份或降级到未授权目标。
 
-Project Defense 的 Source Profile 展示了更窄的能力边界：terminal、file、project 和 code-execution 工具组均禁用，专用只读 Plugin 会把每个请求路径解析到一个明确工作区以内。
+当前不使用 multiplex，因为 Hermes 0.19.0 的 Plugin Manager 无法隔离 Profile 私有 Plugins。这是能力约束，不是允许任意暴露多个端口的理由。
 
-## 进程与端点安全
+## 路径与发布边界
 
-每个 Profile 使用独立 loopback 端口和运行态 API Key。Atelier 在采纳、显示或终止已记录 PID 前，会验证该 PID 的命令行确实属于目标 `hermes -p <profile> gateway run`，避免 PID 复用导致误杀其他进程。
+App Pack Distribution、Case 和 Contract 路径必须是 Pack 内相对路径。Validator 和 Release 拒绝根目录逃逸，并过滤 `.env`、Memory、Sessions、Logs、Trace、PID、`local/` 与 Atelier 数据。
 
-Gateway 启动后若健康检查失败，Atelier 会终止本次新建进程；Build 部分启动失败时会反向停止已经启动的 Profiles。无法完成清理时保留可管理的注册状态并明确报告，而不是丢失进程所有权。
+Builder 规划阶段无写权限；Drafter 只写指定 Draft 根。候选变更进入 Git branch/worktree，不对当前工作树执行隐式 Patch。Project Defense Source Profile 使用随 Distribution 发布的只读示例源码和窄 Plugin，不读取任意宿主目录。
 
-## 失败语义
+## 状态与删除
 
-Trace Store 故障必须可见。Atelier 不会自动切换专家、伪造成功输出或实现业务重试。子 Run 超时会请求 Hermes 原生 stop，并报告 `child_timeout`；“停止请求已发送”不等于“已经停止”。
+Hermes 拥有 Profile、Memory、Sessions、Run、PID 和日志。Atelier `.atelier/v2` 只保存开发证据，可以删除。Pack update 保留 Consumer `.env`、Memory、Sessions 与 `local/`，即使 Manifest 标记 `reset_recommended` 也不静默删除。
 
-若调用授权或父子关联无法在 dispatch 前可靠写入，调用会直接失败。若下游已经启动后事件落盘降级，真实结果或错误仍会返回，同时标记 `trace_degraded`。
+V2 不提供隐式 uninstall。删除 Profile 和长期状态必须由 Consumer 明确指定物理目标。
+
+## 失败与回滚
+
+- Trace Sink 失败不阻断已经成功的业务结果，但必须标记 `trace_degraded`；
+- 模型/目标 Gateway/鉴权失败不能返回伪造结果；
+- update smoke 失败触发 best-effort 恢复旧 Distribution、映射、配置与服务；
+- 回滚不是跨进程事务，任何恢复失败必须显式上抛；
+- `gateway stop` 的意义由 Hermes 原生命令决定，wrapper 不维护自己的 PID 或伪造健康状态。
+
+## 发布前检查
+
+运行仓库测试、Ruff、build、Pack validate/release 和 fresh runtime smoke；用只输出文件名的扫描检查 Key 形状；确认 release 中没有运行态资产；停止本任务启动的全部 Gateway。真实模型输出应按不可信外部输入处理，不能把其自然语言当作权限或运行证据。

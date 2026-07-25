@@ -86,14 +86,16 @@ def test_definition_snapshot_binds_execution_assets(tmp_path: Path) -> None:
     second = build_definition_snapshot(AppPack.load(root))
 
     assert first["revision"] != second["revision"]
-    assert first["agents"]["product"]["files"]["SOUL.md"] != second["agents"]["product"][
-        "files"
-    ]["SOUL.md"]
+    assert (
+        first["agents"]["product"]["files"]["SOUL.md"]
+        != second["agents"]["product"]["files"]["SOUL.md"]
+    )
 
 
 def test_release_excludes_runtime_state_and_generates_lock(tmp_path: Path) -> None:
     source = create_pack(tmp_path / "support")
     (source / ".env").write_text("API_KEY=secret\n", encoding="utf-8")
+    (source / ".DS_Store").write_bytes(b"desktop metadata")
     (source / "local").mkdir()
     (source / "local" / "app-runtime.json").write_text("{}", encoding="utf-8")
     (source / "sessions").mkdir()
@@ -102,15 +104,17 @@ def test_release_excludes_runtime_state_and_generates_lock(tmp_path: Path) -> No
     result = release_pack(AppPack.load(source), destination, git_revision="abc123")
 
     assert not (destination / ".env").exists()
+    assert not (destination / ".DS_Store").exists()
     assert not (destination / "local").exists()
     assert not (destination / "sessions").exists()
     lock = json.loads((destination / "app.lock").read_text(encoding="utf-8"))
     assert lock["pack_revision"] == result["revision"]
     assert lock["git_revision"] == "abc123"
+    assert lock["smoke_case"] == {"id": "smoke", "input": "hello"}
     assert "secret" not in json.dumps(lock)
     assert (destination / "app").stat().st_mode & 0o111
     assert (destination / "profiles" / "dispatcher" / "plugins" / "profile_call").is_dir()
     assert not (destination / "profiles" / "product" / "plugins" / "profile_call").exists()
-    assert "profile_call" in (
-        destination / "profiles" / "dispatcher" / "config.yaml"
-    ).read_text(encoding="utf-8")
+    assert "profile_call" in (destination / "profiles" / "dispatcher" / "config.yaml").read_text(
+        encoding="utf-8"
+    )

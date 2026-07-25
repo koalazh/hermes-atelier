@@ -27,6 +27,7 @@ public_api:
   protocol: openai
   endpoints: [/v1/responses, /v1/chat/completions]
 state_policy: caller_scoped
+state_compatibility: review_required
 cases:
   - cases/evidence-gap.yaml
   - cases/architecture.yaml
