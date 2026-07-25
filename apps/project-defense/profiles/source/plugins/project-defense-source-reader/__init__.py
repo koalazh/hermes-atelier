@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +22,7 @@ SCHEMA = {
 
 
 def _workspace() -> Path:
-    root = Path(os.environ["ATELIER_PROJECT_ROOT"]).resolve()
-    return (root / "apps" / "project-defense" / "sample-source").resolve()
+    return (Path(__file__).resolve().parents[2] / "sample-source").resolve()
 
 
 def _safe_path(relative: str) -> Path:

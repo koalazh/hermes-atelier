@@ -1,24 +1,34 @@
-schema_version: 1
+schema_version: 2
 id: project-defense
-display_name: Project Defense
-description: Evidence-grounded project defense practice over a read-only sample source workspace.
-entry_profile: project-defense--host
-profiles:
-  - name: project-defense--host
-    source: profiles/host
-    description: Leads the defense and decides which evidence or coaching is needed.
-  - name: project-defense--source
-    source: profiles/source
-    description: Reads only the declared source workspace through a constrained tool.
-  - name: project-defense--architecture
-    source: profiles/architecture
+version: 2.0.0
+description: Evidence-grounded project defense practice over a constrained sample workspace.
+entry: host
+agents:
+  host:
+    distribution: profiles/host
+    exposure: public
+    description: Leads the conversation and decides which evidence or coaching is useful.
+  source:
+    distribution: profiles/source
+    exposure: internal
+    description: Reads only the Profile-owned sample source workspace.
+  architecture:
+    distribution: profiles/architecture
+    exposure: internal
     description: Explains architectural tradeoffs without inventing source evidence.
-  - name: project-defense--coach
-    source: profiles/coach
-    description: Coaches delivery using an independent stable memory scope.
+  coach:
+    distribution: profiles/coach
+    exposure: internal
+    description: Coaches delivery using an independent retained Memory scope when requested.
 allowed_calls:
-  project-defense--host:
-    - project-defense--source
-    - project-defense--architecture
-    - project-defense--coach
-scenarios_dir: scenarios
+  host: [source, architecture, coach]
+collaboration: [profile_call]
+public_api:
+  protocol: openai
+  endpoints: [/v1/responses, /v1/chat/completions]
+state_policy: caller_scoped
+cases:
+  - cases/evidence-gap.yaml
+  - cases/architecture.yaml
+  - cases/coach-only.yaml
+contracts: []

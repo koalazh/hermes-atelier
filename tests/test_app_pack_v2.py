@@ -55,16 +55,17 @@ def test_app_pack_uses_logical_agents_and_materializes_instance_mapping(tmp_path
 
     mapping = pack.runtime_mapping(
         instance="customer-a",
-        gateway_base_url="http://127.0.0.1:8080",
+        agent_base_urls={
+            "dispatcher": "http://127.0.0.1:8080",
+            "product": "http://127.0.0.1:8081",
+        },
         api_key_env="HERMES_APP_API_KEY",
         current_agent="dispatcher",
     )
 
     assert pack.entry == "dispatcher"
     assert mapping["agents"]["product"]["profile"] == "customer-a--product"
-    assert mapping["agents"]["product"]["base_url"].endswith(
-        "/p/customer-a--product"
-    )
+    assert mapping["agents"]["product"]["base_url"] == "http://127.0.0.1:8081"
     assert "customer-a--product" not in (pack.root / "app.yaml").read_text()
 
 
@@ -107,3 +108,9 @@ def test_release_excludes_runtime_state_and_generates_lock(tmp_path: Path) -> No
     assert lock["pack_revision"] == result["revision"]
     assert lock["git_revision"] == "abc123"
     assert "secret" not in json.dumps(lock)
+    assert (destination / "app").stat().st_mode & 0o111
+    assert (destination / "profiles" / "dispatcher" / "plugins" / "profile_call").is_dir()
+    assert not (destination / "profiles" / "product" / "plugins" / "profile_call").exists()
+    assert "profile_call" in (
+        destination / "profiles" / "dispatcher" / "config.yaml"
+    ).read_text(encoding="utf-8")

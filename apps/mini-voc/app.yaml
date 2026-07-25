@@ -1,20 +1,32 @@
-schema_version: 1
+schema_version: 2
 id: mini-voc
-display_name: Mini VOC
-description: A simulated voice-of-customer triage application with independently tooled experts.
-entry_profile: mini-voc--dispatcher
-profiles:
-  - name: mini-voc--dispatcher
-    source: profiles/dispatcher
+version: 2.0.0
+description: A simulated voice-of-customer triage App Pack with independently tooled experts.
+entry: dispatcher
+agents:
+  dispatcher:
+    distribution: profiles/dispatcher
+    exposure: public
     description: Clarifies feedback and decides whether specialist evidence is needed.
-  - name: mini-voc--product
-    source: profiles/product
+  product:
+    distribution: profiles/product
+    exposure: internal
     description: Looks up simulated product ownership and release evidence.
-  - name: mini-voc--transaction
-    source: profiles/transaction
+  transaction:
+    distribution: profiles/transaction
+    exposure: internal
     description: Looks up simulated order and refund evidence.
 allowed_calls:
-  mini-voc--dispatcher:
-    - mini-voc--product
-    - mini-voc--transaction
-scenarios_dir: scenarios
+  dispatcher: [product, transaction]
+collaboration: [profile_call]
+public_api:
+  protocol: openai
+  endpoints: [/v1/responses, /v1/chat/completions]
+  output_contract: contracts/output.schema.json
+state_policy: session_only
+cases:
+  - cases/clarify.yaml
+  - cases/product.yaml
+  - cases/cross-domain.yaml
+  - cases/expert-failure.yaml
+contracts: [contracts/output.schema.json]

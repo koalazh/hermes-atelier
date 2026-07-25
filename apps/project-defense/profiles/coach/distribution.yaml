@@ -1,5 +1,5 @@
-name: project-defense--coach
-version: 1.0.0
+name: project-defense-coach
+version: 2.0.0
 description: "Project Defense delivery coach with independent Memory"
 hermes_requires: ">=0.19.0"
 author: "Hermes Atelier"

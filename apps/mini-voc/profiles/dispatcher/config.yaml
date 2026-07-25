@@ -1,9 +1,4 @@
-model:
-  default: ${ATELIER_MODEL}
-  provider: custom
-  base_url: ${ATELIER_MODEL_BASE_URL}
-terminal:
-  backend: local
-  cwd: ${ATELIER_PROJECT_ROOT}/apps/mini-voc/profiles/dispatcher
+agent:
+  disabled_toolsets: [terminal, file, code_execution]
 plugins:
-  enabled: [atelier]
+  enabled: [profile_call]

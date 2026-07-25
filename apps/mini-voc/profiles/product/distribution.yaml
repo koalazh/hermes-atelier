@@ -1,5 +1,5 @@
-name: mini-voc--product
-version: 1.0.0
+name: mini-voc-product
+version: 2.0.0
 description: "Mini VOC product evidence Agent"
 hermes_requires: ">=0.19.0"
 author: "Hermes Atelier"

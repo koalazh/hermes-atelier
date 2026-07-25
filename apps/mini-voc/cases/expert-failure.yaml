@@ -1,0 +1,9 @@
+id: expert-failure
+input: "请核查订单 ORD-FAIL 的退款状态，不要猜测。"
+memory_policy: clean
+assertions:
+  calls:
+    required: [transaction]
+  output:
+    must_not_claim: [refunded, payment_pending]
+human_review: 专家不可用是调用事实，不是订单状态证据。

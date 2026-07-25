@@ -187,14 +187,15 @@ class AppPack:
         self,
         *,
         instance: str,
-        gateway_base_url: str,
+        agent_base_urls: dict[str, str],
         api_key_env: str,
         current_agent: str,
         trace: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         if not LOGICAL_ID_RE.fullmatch(instance) or current_agent not in self.manifest.agents:
             raise ValueError("invalid instance or current logical Agent")
-        base = gateway_base_url.rstrip("/")
+        if set(agent_base_urls) != set(self.manifest.agents):
+            raise ValueError("agent base URLs must cover every logical Agent")
         mapping: dict[str, Any] = {
             "schema_version": 1,
             "pack_id": self.manifest.id,
@@ -204,7 +205,7 @@ class AppPack:
             "agents": {
                 agent_id: {
                     "profile": f"{instance}--{agent_id}",
-                    "base_url": f"{base}/p/{instance}--{agent_id}",
+                    "base_url": agent_base_urls[agent_id].rstrip("/"),
                     "api_key_env": api_key_env,
                 }
                 for agent_id in self.manifest.agents
@@ -259,6 +260,40 @@ def release_pack(
     if destination.exists():
         raise ValueError(f"release destination already exists: {destination}")
     shutil.copytree(pack.root, destination, ignore=_ignore_runtime)
+    if "profile_call" in pack.manifest.collaboration:
+        plugin_source = Path(__file__).resolve().parents[1] / "profile_call"
+        for source in pack.manifest.allowed_calls:
+            distribution = destination / pack.manifest.agents[source].distribution
+            plugin_target = distribution / "plugins" / "profile_call"
+            plugin_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(plugin_source, plugin_target)
+            distribution_manifest_path = distribution / "distribution.yaml"
+            distribution_manifest = yaml.safe_load(
+                distribution_manifest_path.read_text(encoding="utf-8")
+            ) or {}
+            owned = list(distribution_manifest.get("distribution_owned") or [])
+            if "plugins/profile_call" not in owned:
+                owned.append("plugins/profile_call")
+            distribution_manifest["distribution_owned"] = owned
+            distribution_manifest_path.write_text(
+                yaml.safe_dump(distribution_manifest, sort_keys=False), encoding="utf-8"
+            )
+            config_path = distribution / "config.yaml"
+            config = (
+                yaml.safe_load(config_path.read_text(encoding="utf-8"))
+                if config_path.is_file()
+                else {}
+            )
+            config = config if isinstance(config, dict) else {}
+            plugins = config.setdefault("plugins", {})
+            enabled = plugins.setdefault("enabled", [])
+            enabled[:] = [item for item in enabled if item != "atelier"]
+            if "profile_call" not in enabled:
+                enabled.append("profile_call")
+            config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    runner_source = Path(__file__).with_name("pack_app.py")
+    shutil.copy2(runner_source, destination / "app")
+    (destination / "app").chmod(0o755)
     released = AppPack.load(destination)
     snapshot = build_definition_snapshot(released)
     lock = {
@@ -268,6 +303,7 @@ def release_pack(
         "pack_revision": snapshot["revision"],
         "git_revision": git_revision,
         "agents": snapshot["agents"],
+        "manifest": released.manifest.model_dump(mode="json"),
     }
     (destination / "app.lock").write_text(
         json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

@@ -1,11 +1,4 @@
-model:
-  default: ${ATELIER_MODEL}
-  provider: custom
-  base_url: ${ATELIER_MODEL_BASE_URL}
-terminal:
-  backend: local
-  cwd: ${ATELIER_PROJECT_ROOT}/apps/project-defense/sample-source
 agent:
   disabled_toolsets: [terminal, file, code_execution, project]
 plugins:
-  enabled: [atelier, project-defense-source-reader]
+  enabled: [project-defense-source-reader]

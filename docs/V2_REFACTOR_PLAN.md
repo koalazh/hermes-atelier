@@ -131,7 +131,7 @@ Reviewer 读取冻结 Bundle，Builder 生成 Patch，后端对当前工作树�
 - `/v1/chat/completions` 支持 `X-Hermes-Session-Id` 与 `X-Hermes-Session-Key`；
 - `/v1/responses` 支持 `previous_response_id`；
 - `/v1/runs` 提供异步执行、SSE events、status、approval 与 stop；
-- `gateway.multiplex_profiles` 可由一个原生 Gateway 通过 `/p/<profile>/...` 服务多个隔离 Profile，并在每个 Profile 的 HERMES_HOME、Secrets、Session DB 与模型作用域内执行；
+- `gateway.multiplex_profiles` 可路由多个 Profile 的模型、Secrets 与 Session，但 Hermes 0.19.0 的 Plugin Manager 是进程级单例，只在 Gateway 默认 Profile 下发现一次插件；因此它不适合需要不同业务 Plugins 的当前两个示例；
 - Profile 路由、Plugins、Dashboard Plugin 与 Kanban 已由 Hermes 提供。
 
 V2 应直接采用这些接口。Atelier 不再维护 Profile Manager、Endpoint Registry、PID Manager、端口扫描、Session Store、通用 Chat 或 Gateway 状态机。
@@ -182,7 +182,9 @@ Pack 是普通目录或 Git 仓库。`app.yaml` 保存稳定事实；`app.lock` 
 
 ### 8.2 原生 Gateway 与公开入口
 
-V2 默认利用当前 Hermes multiplex：一个 Hermes 原生 Gateway 监听一个端口，入口 URL 为 `/p/<instance--entry>/v1/...`。`./app start/stop/status` 只代理 Hermes 原生命令；`INSTALL.md` 同时给出不使用 wrapper 的等价命令。
+V2 默认使用 Hermes 原生的一 Profile 一 Gateway 模式，为每个物理 Profile 分配显式本地端口。`./app start/stop/status` 只逐个代理 Hermes 原生命令；PID、launchd 服务、健康状态与 Session 仍完全由 Hermes 管理。`INSTALL.md` 同时给出不使用 wrapper 的等价命令。
+
+真实 capability probe 已验证：multiplex 能正确切换请求 Profile，却不会重新发现路由 Profile 私有的 `profile_call` 和业务 Plugins，入口因此看不到这些工具。把所有插件提升为进程全局会破坏工具隔离，所以不采用。未来 Hermes 若支持 Profile-scoped Plugin registry，Pack 可重新合并监听端口，而无需改变逻辑 Agent 或 `profile_call` 协议。
 
 Atelier 不拥有 Gateway 状态。内部 Profiles 不在 Public Contract 中暴露；真实生产 ingress、认证和网络隔离仍由 Consumer 负责。
 
@@ -223,7 +225,7 @@ Atelier 只展示 Candidate branch/worktree、Diff 与 Experiment 比较。创�
 源码与 Hermes 自身测试已证明接口存在，V2 完成前仍必须在 fresh HERMES_HOME 验证：
 
 1. 本地 Distribution 安装、物理重命名、update 与 delete；
-2. multiplex Gateway 对 `/p/<profile>/v1/models`、Chat、Responses、Runs、Sessions 的 Profile 隔离；
+2. 每个物理 Profile 的原生 Gateway 对 Models、Chat、Responses、Runs、Sessions 与私有 Plugins 的隔离；
 3. Profile 内独立 Plugin 能读取当前 Profile 的 `local/`；
 4. `profile_call` 在无 Atelier、无 `.atelier`、普通 HTTP Session 下调用专家；
 5. Hermes update 保留 `.env`、Memory、Sessions 与 `local/`；
@@ -240,7 +242,7 @@ Atelier 只展示 Candidate branch/worktree、Diff 与 Experiment 比较。创�
 1. 将 Mini VOC 转成逻辑 Agent App Pack；
 2. fresh HERMES_HOME 安装为一个实例；
 3. 入口 Profile 使用独立 `profile_call`；
-4. 启动 Hermes 原生 multiplex Gateway；
+4. 为每个物理 Profile 启动 Hermes 原生 Gateway；
 5. 从外部客户端调用入口原生 HTTP API；
 6. 在没有 Dashboard 和 `.atelier` 的条件下完成专家调用；
 7. 用 clean Case 记录 Definition Snapshot、Trial、Trace 与 assertions；
@@ -252,7 +254,7 @@ Atelier 只展示 Candidate branch/worktree、Diff 与 Experiment 比较。创�
 
 | 风险 | 控制与回退 |
 | --- | --- |
-| Hermes multiplex 在本机或目标环境存在兼容差异 | capability probe 失败即停止 release；保留使用多个原生 Gateway 的文档化兼容方案，但不恢复 Atelier PID/端口 Registry |
+| Hermes multiplex 无法隔离 Profile 私有 Plugins | 已选择多个 Hermes 原生 Gateway；wrapper 只代理生命周期并生成静态端口映射，不恢复 Atelier PID/Endpoint Registry |
 | 逻辑/物理 Profile 映射错误 | install preflight 校验全部 Agent 与 allowed calls；映射只在成功后原子替换；失败保留旧 `local/` |
 | update 删除 Profile 后留存运行态 | 先 stop，使用 Hermes `profile delete` 清理旧物理 Profile，再生成映射；失败不报告成功 |
 | update/rollback 造成源码与运行态不一致 | release 以不可变 Pack revision 和 lock 为输入；失败时按旧 lock 重新 `profile update/install`，并执行 smoke Case |

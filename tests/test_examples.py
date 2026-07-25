@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import shutil
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -10,10 +9,8 @@ from typing import Any
 import pytest
 import yaml
 
+from plugin.atelier.app_pack import AppPack, build_definition_snapshot
 from plugin.atelier.paths import project_root
-from plugin.atelier.schemas import load_app_definition
-from plugin.atelier.services.apps import AppService
-from plugin.atelier.store import AtelierStore
 
 
 class ToolContext:
@@ -33,13 +30,13 @@ def load_plugin(path: Path) -> ModuleType:
 
 
 def test_example_applications_share_only_the_generic_contract() -> None:
-    mini_voc = load_app_definition(project_root() / "apps" / "mini-voc" / "app.yaml")
-    defense = load_app_definition(project_root() / "apps" / "project-defense" / "app.yaml")
+    mini_voc = AppPack.load(project_root() / "apps" / "mini-voc")
+    defense = AppPack.load(project_root() / "apps" / "project-defense")
 
-    assert len(mini_voc.profiles) == 3
-    assert len(defense.profiles) == 4
-    assert set(mini_voc.allowed_calls) == {"mini-voc--dispatcher"}
-    assert set(defense.allowed_calls) == {"project-defense--host"}
+    assert len(mini_voc.manifest.agents) == 3
+    assert len(defense.manifest.agents) == 4
+    assert set(mini_voc.manifest.allowed_calls) == {"dispatcher"}
+    assert set(defense.manifest.allowed_calls) == {"host"}
 
     core = "\n".join(
         path.read_text(encoding="utf-8")
@@ -72,10 +69,7 @@ def test_mini_voc_specialists_expose_distinct_simulated_tools() -> None:
         context.tools["voc_transaction_lookup"]({"order_id": "ORD-FAIL"})
 
 
-def test_source_reader_is_constrained_and_source_profile_has_no_write_tools(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("ATELIER_PROJECT_ROOT", str(project_root()))
+def test_source_reader_is_constrained_and_source_profile_has_no_write_tools() -> None:
     source = project_root() / "apps" / "project-defense" / "profiles" / "source"
     module = load_plugin(
         source / "plugins" / "project-defense-source-reader" / "__init__.py"
@@ -98,27 +92,28 @@ def test_source_reader_is_constrained_and_source_profile_has_no_write_tools(
 
 
 def test_examples_cover_no_call_multi_call_failure_and_evidence_gap() -> None:
-    voc_scenarios = {
-        path.stem for path in (project_root() / "apps" / "mini-voc" / "scenarios").glob("*.yaml")
+    voc_cases = {
+        path.stem for path in (project_root() / "apps" / "mini-voc" / "cases").glob("*.yaml")
     }
-    defense_scenarios = {
+    defense_cases = {
         path.stem
-        for path in (project_root() / "apps" / "project-defense" / "scenarios").glob("*.yaml")
+        for path in (project_root() / "apps" / "project-defense" / "cases").glob("*.yaml")
     }
 
-    assert {"clarify", "cross-domain", "expert-failure"} <= voc_scenarios
-    assert {"evidence-gap", "architecture", "coach-only"} <= defense_scenarios
+    assert {"clarify", "cross-domain", "expert-failure"} <= voc_cases
+    assert {"evidence-gap", "architecture", "coach-only"} <= defense_cases
 
 
 def test_project_defense_stable_memory_is_scoped_to_coaching() -> None:
-    scenarios = project_root() / "apps" / "project-defense" / "scenarios"
-    coach = yaml.safe_load((scenarios / "coach-only.yaml").read_text(encoding="utf-8"))
-    evidence = yaml.safe_load((scenarios / "evidence-gap.yaml").read_text(encoding="utf-8"))
-    architecture = yaml.safe_load((scenarios / "architecture.yaml").read_text(encoding="utf-8"))
+    cases = project_root() / "apps" / "project-defense" / "cases"
+    coach = yaml.safe_load((cases / "coach-only.yaml").read_text(encoding="utf-8"))
+    evidence = yaml.safe_load((cases / "evidence-gap.yaml").read_text(encoding="utf-8"))
+    architecture = yaml.safe_load((cases / "architecture.yaml").read_text(encoding="utf-8"))
 
     assert coach["memory_scope"] == "demo-candidate-durable-queue"
-    assert "memory_scope" not in evidence
-    assert "memory_scope" not in architecture
+    assert coach["memory_policy"] == "retained"
+    assert evidence["memory_policy"] == "clean"
+    assert architecture["memory_policy"] == "session_only"
 
 
 def test_project_defense_architecture_forbids_unmeasured_numbers() -> None:
@@ -132,21 +127,9 @@ def test_project_defense_architecture_forbids_unmeasured_numbers() -> None:
     assert "do not supply numerical performance estimates" in skill
 
 
-def test_app_detail_exposes_saved_scenarios_and_revision_tracks_profile_assets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source = project_root() / "apps" / "mini-voc"
-    app_dir = tmp_path / "apps" / "mini-voc"
-    shutil.copytree(source, app_dir)
-    monkeypatch.setenv("ATELIER_PROJECT_ROOT", str(tmp_path))
-    service = AppService(AtelierStore(tmp_path / "atelier.db"))
-    first = service.register(app_dir)
-    scenarios = service.get("mini-voc")["scenarios"]
-    skill = app_dir / "profiles" / "dispatcher" / "skills" / "mini-voc-dispatch" / "SKILL.md"
-    skill.write_text(skill.read_text(encoding="utf-8") + "\nrevision marker\n", encoding="utf-8")
-    second = service.register(app_dir)
+def test_example_definition_snapshot_tracks_profile_assets() -> None:
+    pack = AppPack.load(project_root() / "apps" / "mini-voc")
+    snapshot = build_definition_snapshot(pack)
 
-    assert {item["id"] for item in scenarios} >= {"clarify", "product"}
-    assert all(item["input"] for item in scenarios)
-    assert len(first["definition_revision"]) == 16
-    assert second["definition_revision"] != first["definition_revision"]
+    assert len(snapshot["revision"]) == 64
+    assert "SOUL.md" in snapshot["agents"]["dispatcher"]["files"]

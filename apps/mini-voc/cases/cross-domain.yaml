@@ -1,0 +1,9 @@
+id: cross-domain
+input: "订单 ORD-1001 已退款，但下载导出仍提示处理中。分别是什么状态？"
+memory_policy: clean
+assertions:
+  calls:
+    required: [product, transaction]
+  output:
+    must_contain: [ORD-1001]
+human_review: 两个领域的证据应分开归因，不应编造跨域联动事实。
