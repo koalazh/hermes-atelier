@@ -358,9 +358,32 @@ class PackRuntime:
             if not scope:
                 raise RuntimeError("retained Case requires memory_scope")
             headers["X-Hermes-Session-Key"] = scope
+        if case.get("memory_policy") == "retained":
+            instructions = (
+                f"Use only the explicit retained caller scope {case['memory_scope']!r}. "
+                "Pass that exact scope only to state tools that accept it."
+            )
+        elif case.get("memory_policy") == "session_only":
+            instructions = "Use only this new Hermes Session; do not request retained state."
+        else:
+            instructions = "This is a clean trial; do not request or reuse retained state."
+        contract = lock["manifest"].get("public_api", {}).get("output_contract")
+        if contract:
+            schema = _load_json(self.pack_root / str(contract))
+            instructions += (
+                " Your final response must be exactly one JSON value matching this schema, "
+                "with no Markdown fence or surrounding text: "
+                + json.dumps(schema, ensure_ascii=False, sort_keys=True)
+            )
         request = urllib.request.Request(
             f"{base_url}/v1/runs",
-            data=json.dumps({"input": case["input"], "session_id": session_id}).encode(),
+            data=json.dumps(
+                {
+                    "input": case["input"],
+                    "session_id": session_id,
+                    "instructions": instructions,
+                }
+            ).encode(),
             headers=headers,
             method="POST",
         )
