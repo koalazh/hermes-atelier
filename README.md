@@ -120,7 +120,7 @@ curl http://127.0.0.1:19300/v1/chat/completions \
 
 ## 两个回归应用
 
-- `apps/mini-voc`：入口自主选择不调用、调用 product、transaction 或两者；有结构化输出 Contract，状态为 `session_only`。
+- `apps/mini-voc`：入口自主选择不调用、调用 product、transaction 或两者；回答遵循半结构化语义约束，状态为 `session_only`。
 - `apps/project-defense`：入口按需调用 source、architecture、coach；源码插件和样例源码随 source Distribution 发布，状态为 `caller_scoped`，升级需 `review_required`。
 
 Atelier 核心没有任何 VOC 或答辩业务分支。

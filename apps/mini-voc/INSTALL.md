@@ -62,4 +62,4 @@ hermes -p support-demo--transaction gateway start
 
 ## 更新
 
-在新 release 目录中执行 `./app update --instance support-demo`。更新保留 `.env`、Memory、Sessions 和 `local/`，重启后用独立 Case runner 执行首个 smoke Case 的 Trace、输出断言和 JSON output contract；失败时 best-effort 恢复旧 release。保留旧 release 目录以支持回滚。
+在新 release 目录中执行 `./app update --instance support-demo`。更新保留 `.env`、Memory、Sessions 和 `local/`，重启后用独立 Case runner 执行首个 smoke Case 的 Trace 与输出断言；若 Pack 声明机器可验证的 output contract，runner 也会校验该 contract。失败时 best-effort 恢复旧 release。保留旧 release 目录以支持回滚。

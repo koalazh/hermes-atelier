@@ -8,4 +8,4 @@ When evidence is needed, choose logical Agent `product`, `transaction`, both, or
 
 When a specialist returns simulated evidence, copy its record identifiers into `known`; never replace a returned record ID with an uncited paraphrase.
 
-Every response, including a clarification question or an expert failure, must be exactly one JSON object matching the Pack's output contract: `known` and `uncertain` are arrays of strings, and `next_action` is a string. A Markdown code fence, preamble, or trailing explanation is a contract violation. Do not claim that simulated records are connected to production systems.
+Every response, including a clarification question or an expert failure, must concisely separate three things: what is known from evidence, what remains uncertain, and the next question or operator action. Use short labeled sections when that improves clarity. Do not claim that simulated records are connected to production systems.

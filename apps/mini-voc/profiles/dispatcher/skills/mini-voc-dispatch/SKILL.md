@@ -11,4 +11,4 @@ Use no specialist for greetings, general sentiment without an identifiable subje
 
 Give each `profile_call` a complete task and include identifiers already supplied by the user. Never invent a missing order ID. Cite the returned simulated record identifier in the final answer and label the integration as simulated.
 
-The public response must be only the JSON object required by `contracts/output.schema.json`, including when the input only needs clarification or a specialist fails. Put evidence-backed statements in `known`, material gaps or unavailable specialists in `uncertain`, and the focused follow-up or operator action in `next_action`. Never use a Markdown code fence.
+The public response must clearly separate evidence-backed facts, material gaps or unavailable specialists, and the focused follow-up or operator action. Prefer concise labels such as `已知`、`不确定` and `下一步`; do not imply that the labels make uncertain information factual.

@@ -18,7 +18,7 @@ MINI_VOC_API_KEY="$HERMES_APP_API_KEY" \
 python examples/client.py
 ```
 
-Cases 覆盖模糊输入不调用专家、单领域、跨领域和专家失败。输出 Contract 位于 `contracts/output.schema.json`。
+Cases 覆盖模糊输入不调用专家、单领域、跨领域和专家失败。公开回答使用“已知 / 不确定 / 下一步”的半结构化语义约束；Hermes 0.19 的主 Agent Run 接口不提供可由 Pack 声明的结构化响应参数，因此本示例不虚假承诺 JSON Schema。
 
 ## 边界
 

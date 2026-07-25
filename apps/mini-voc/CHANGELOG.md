@@ -6,5 +6,5 @@
 - 入口改为 Hermes 原生 OpenAI 兼容 API；
 - 使用独立 `profile_call` 调用 Product/Transaction；
 - Scenario 迁移为无 Workflow 的 Case；
-- 添加结构化输出 Contract、安装说明和示例客户端；
+- 添加半结构化业务输出约束、安装说明和示例客户端；
 - 明确所有业务记录均为模拟数据。

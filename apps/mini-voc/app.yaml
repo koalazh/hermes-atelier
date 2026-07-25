@@ -22,7 +22,6 @@ collaboration: [profile_call]
 public_api:
   protocol: openai
   endpoints: [/v1/responses, /v1/chat/completions]
-  output_contract: contracts/output.schema.json
 state_policy: session_only
 state_compatibility: preserve
 cases:
@@ -30,4 +29,4 @@ cases:
   - cases/product.yaml
   - cases/cross-domain.yaml
   - cases/expert-failure.yaml
-contracts: [contracts/output.schema.json]
+contracts: []
