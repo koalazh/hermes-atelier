@@ -3,12 +3,9 @@ model:
   provider: custom
   base_url: ${ATELIER_MODEL_BASE_URL}
 
-agent:
-  disabled_toolsets: [terminal, file, code_execution, session_search, memory, delegation]
-
 terminal:
   backend: local
-  cwd: ${ATELIER_PROJECT_ROOT}/apps/.drafts
+  cwd: ${ATELIER_DRAFT_ROOT}
   timeout: 180
 
 plugins:

@@ -45,3 +45,44 @@ async def test_parses_run_and_sse_contract() -> None:
 def test_rejects_invalid_sse_json() -> None:
     with pytest.raises(AtelierError, match="invalid SSE JSON"):
         HermesHTTPClient._parse_sse_line("data: not-json")
+
+
+@pytest.mark.asyncio
+async def test_uses_native_session_create_and_chat_for_multiturn() -> None:
+    requests: list[tuple[str, str, dict]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else {}
+        requests.append((request.method, request.url.path, body))
+        if request.url.path == "/api/sessions":
+            return httpx.Response(201, json={"session": {"id": body["id"]}})
+        if request.url.path.endswith("/chat"):
+            return httpx.Response(
+                200,
+                json={
+                    "session_id": "design-session",
+                    "message": {"role": "assistant", "content": "PLAN_READY"},
+                },
+            )
+        raise AssertionError(request.url.path)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as raw_client:
+        client = HermesHTTPClient("http://profile", "local-secret", client=raw_client)
+        await client.ensure_session("design-session", title="Design")
+        result = await client.chat_session(
+            "design-session", message="continue", instructions="planning only"
+        )
+
+    assert result["message"]["content"] == "PLAN_READY"
+    assert requests == [
+        (
+            "POST",
+            "/api/sessions",
+            {"id": "design-session", "title": "Design"},
+        ),
+        (
+            "POST",
+            "/api/sessions/design-session/chat",
+            {"message": "continue", "instructions": "planning only"},
+        ),
+    ]

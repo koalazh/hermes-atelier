@@ -62,6 +62,48 @@ class HermesHTTPClient:
             raise AtelierError("child_call_failed", "Hermes returned an invalid run id")
         return run_id
 
+    async def ensure_session(self, session_id: str, *, title: str | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {"id": session_id}
+        if title:
+            body["title"] = title
+        response = await self._request("POST", "/api/sessions", json_body=body)
+        if response.status_code == 409:
+            existing = await self._request("GET", f"/api/sessions/{session_id}")
+            if existing.status_code != 200:
+                raise AtelierError(
+                    "session_failed",
+                    f"Hermes Session lookup returned HTTP {existing.status_code}",
+                )
+            return existing.json()
+        if response.status_code != 201:
+            raise AtelierError(
+                "session_failed",
+                f"Hermes Session create returned HTTP {response.status_code}",
+            )
+        return response.json()
+
+    async def chat_session(
+        self,
+        session_id: str,
+        *,
+        message: str,
+        instructions: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"message": message}
+        if instructions:
+            body["instructions"] = instructions
+        response = await self._request("POST", f"/api/sessions/{session_id}/chat", json_body=body)
+        if response.status_code != 200:
+            raise AtelierError(
+                "session_failed",
+                f"Hermes Session chat returned HTTP {response.status_code}",
+            )
+        payload = response.json()
+        content = payload.get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise AtelierError("session_failed", "Hermes Session returned an empty response")
+        return payload
+
     async def events(self, run_id: str) -> AsyncIterator[dict[str, Any]]:
         url = f"{self.base_url}/v1/runs/{run_id}/events"
         if self._client is not None:
@@ -114,7 +156,9 @@ class HermesHTTPClient:
         payload = response.json()
         if isinstance(payload, list):
             return payload
-        messages = payload.get("messages", []) if isinstance(payload, dict) else []
+        messages = (
+            payload.get("messages", payload.get("data", [])) if isinstance(payload, dict) else []
+        )
         return messages if isinstance(messages, list) else []
 
     async def health(self) -> dict[str, Any]:

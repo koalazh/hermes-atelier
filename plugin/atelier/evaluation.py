@@ -1,0 +1,310 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any, Literal
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .app_pack import FORBIDDEN_WORKFLOW_KEYS, AppPack, build_definition_snapshot
+from .hermes_http import HermesHTTPClient
+from .redaction import redact, redact_text
+from .studio_store import StudioStore, _now
+
+
+class CallAssertions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    required: list[str] = Field(default_factory=list)
+    forbidden: list[str] = Field(default_factory=list)
+
+
+class OutputAssertions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    must_contain: list[str] = Field(default_factory=list)
+    must_not_claim: list[str] = Field(default_factory=list)
+
+
+class Assertions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    calls: CallAssertions = Field(default_factory=CallAssertions)
+    output: OutputAssertions = Field(default_factory=OutputAssertions)
+
+
+class CaseDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    input: str = Field(min_length=1)
+    initial_state: dict[str, Any] = Field(default_factory=dict)
+    memory_policy: Literal["clean", "session_only", "retained"]
+    memory_scope: str | None = None
+    assertions: Assertions = Field(default_factory=Assertions)
+    human_review: str | None = None
+
+    @model_validator(mode="after")
+    def retained_scope(self) -> CaseDefinition:
+        if self.memory_policy == "retained" and not self.memory_scope:
+            raise ValueError("retained Case requires memory_scope")
+        if self.memory_policy != "retained" and self.memory_scope:
+            raise ValueError("memory_scope is only valid for retained Cases")
+        return self
+
+
+def _has_workflow_key(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(
+            str(key) in FORBIDDEN_WORKFLOW_KEYS or _has_workflow_key(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, list):
+        return any(_has_workflow_key(item) for item in value)
+    return False
+
+
+def load_case(path: Path) -> tuple[CaseDefinition, str]:
+    content = path.read_bytes()
+    raw = yaml.safe_load(content)
+    if not isinstance(raw, dict):
+        raise ValueError("Case must contain a YAML mapping")
+    if _has_workflow_key(raw):
+        raise ValueError("Case must describe outcomes, not workflow")
+    return CaseDefinition.model_validate(raw), hashlib.sha256(content).hexdigest()
+
+
+def _terminal_output(event: dict[str, Any]) -> str:
+    output = event.get("output")
+    if isinstance(output, str):
+        return output
+    response = event.get("response")
+    if isinstance(response, dict):
+        nested = response.get("output_text") or response.get("output")
+        if isinstance(nested, str):
+            return nested
+    return ""
+
+
+def evaluate_assertions(
+    case: CaseDefinition,
+    *,
+    output: str,
+    traces: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    completed_targets = {
+        str(event.get("target"))
+        for event in traces
+        if event.get("event") == "profile_call.completed"
+    }
+    results = []
+    for target in case.assertions.calls.required:
+        results.append(
+            {
+                "kind": "calls.required",
+                "value": target,
+                "passed": target in completed_targets,
+            }
+        )
+    attempted_targets = {str(event.get("target")) for event in traces}
+    for target in case.assertions.calls.forbidden:
+        results.append(
+            {
+                "kind": "calls.forbidden",
+                "value": target,
+                "passed": target not in attempted_targets,
+            }
+        )
+    folded = output.casefold()
+    for value in case.assertions.output.must_contain:
+        results.append(
+            {
+                "kind": "output.must_contain",
+                "value": value,
+                "passed": value.casefold() in folded,
+            }
+        )
+    for value in case.assertions.output.must_not_claim:
+        results.append(
+            {
+                "kind": "output.must_not_claim",
+                "value": value,
+                "passed": value.casefold() not in folded,
+            }
+        )
+    return results
+
+
+class ExperimentService:
+    def __init__(
+        self,
+        store: StudioStore,
+        *,
+        client_factory: Any = HermesHTTPClient,
+        custom_evaluator: Callable[[CaseDefinition, dict[str, Any]], list[dict[str, Any]]]
+        | None = None,
+    ) -> None:
+        self.store = store
+        self.client_factory = client_factory
+        self.custom_evaluator = custom_evaluator
+
+    async def run(
+        self,
+        *,
+        pack_root: Path,
+        case_path: Path,
+        entry_base_url: str,
+        api_key: str,
+        model_fingerprint: dict[str, Any],
+        trial_count: int = 1,
+        candidate: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        if trial_count < 1 or trial_count > 20:
+            raise ValueError("trial_count must be between 1 and 20")
+        pack = AppPack.load(pack_root)
+        case, case_hash = load_case(case_path)
+        if case_path.resolve().parent != (pack.root / "cases").resolve():
+            raise ValueError("Case must belong to the App Pack cases directory")
+        snapshot = build_definition_snapshot(pack)
+        experiment_id = uuid.uuid4().hex
+        experiment: dict[str, Any] = {
+            "id": experiment_id,
+            "status": "running",
+            "pack_id": pack.manifest.id,
+            "pack_version": pack.manifest.version,
+            "pack_revision": snapshot["revision"],
+            "definition_snapshot": snapshot,
+            "model_fingerprint": redact(model_fingerprint),
+            "case": case.model_dump(mode="json"),
+            "case_path": str(case_path.resolve()),
+            "case_hash": case_hash,
+            "memory_policy": case.memory_policy,
+            "candidate": candidate,
+            "trials": [],
+            "human_feedback": None,
+            "review": None,
+            "created_at": _now(),
+        }
+        self.store.save_experiment(experiment)
+        client = self.client_factory(entry_base_url, api_key)
+        try:
+            for index in range(trial_count):
+                trial = await self._trial(
+                    client,
+                    experiment_id=experiment_id,
+                    case=case,
+                    index=index,
+                )
+                experiment["trials"].append(trial)
+                self.store.save_experiment(experiment)
+            _, current_hash = load_case(case_path)
+            if current_hash != case_hash:
+                raise RuntimeError("Case changed during Experiment")
+            experiment["status"] = (
+                "completed"
+                if all(trial["assertions_passed"] for trial in experiment["trials"])
+                else "assertions_failed"
+            )
+        except Exception as exc:
+            experiment.update(status="failed", error=redact_text(str(exc))[:2000])
+            self.store.save_experiment(experiment)
+            raise
+        self.store.save_experiment(experiment)
+        return experiment
+
+    async def _trial(
+        self,
+        client: HermesHTTPClient,
+        *,
+        experiment_id: str,
+        case: CaseDefinition,
+        index: int,
+    ) -> dict[str, Any]:
+        trial_id = uuid.uuid4().hex
+        session_id = f"atelier_exp_{experiment_id}_{index}_{trial_id[:8]}"
+        run_id = await client.start_run(
+            task=case.input,
+            session_id=session_id,
+            memory_scope=case.memory_scope if case.memory_policy == "retained" else None,
+        )
+        terminal: dict[str, Any] | None = None
+        output_parts: list[str] = []
+        async for event in client.events(run_id):
+            if event.get("event") == "message.delta" and isinstance(event.get("delta"), str):
+                output_parts.append(event["delta"])
+            if str(event.get("event") or "").startswith("run."):
+                terminal = event
+        terminal = terminal or await client.status(run_id)
+        status = str(terminal.get("status") or terminal.get("event", "")).removeprefix("run.")
+        output = "".join(output_parts) or _terminal_output(terminal)
+        traces = self.store.traces(session_id)
+        assertions = evaluate_assertions(case, output=output, traces=traces)
+        trial = {
+            "id": trial_id,
+            "index": index,
+            "session_id": session_id,
+            "hermes_run_id": run_id,
+            "status": status,
+            "output": redact_text(output),
+            "traces": traces,
+            "assertions": assertions,
+            "assertions_passed": status == "completed"
+            and all(item["passed"] for item in assertions),
+        }
+        if self.custom_evaluator:
+            custom = self.custom_evaluator(case, trial)
+            trial["custom_assertions"] = custom
+            trial["assertions_passed"] = trial["assertions_passed"] and all(
+                item.get("passed") is True for item in custom
+            )
+        return trial
+
+    def feedback(self, experiment_id: str, feedback: str) -> dict[str, Any]:
+        experiment = self.store.get_experiment(experiment_id)
+        experiment["human_feedback"] = redact_text(feedback)
+        self.store.save_experiment(experiment)
+        return experiment
+
+    async def review(
+        self,
+        experiment_id: str,
+        *,
+        reviewer_base_url: str,
+        reviewer_api_key: str,
+    ) -> dict[str, Any]:
+        experiment = self.store.get_experiment(experiment_id)
+        if experiment["status"] not in {"completed", "assertions_failed"}:
+            raise ValueError("Reviewer requires a completed Experiment")
+        bundle = json.dumps(experiment, ensure_ascii=False, sort_keys=True)
+        client = self.client_factory(reviewer_base_url, reviewer_api_key)
+        session_id = f"atelier_review_{experiment_id}"
+        run_id = await client.start_run(
+            task=(
+                "Analyze this frozen Experiment. Report observations, evidence, hypotheses, "
+                "uncertainty, risks, and validation suggestions. Do not claim an optimization "
+                f"was completed and do not modify anything.\n\n{bundle}"
+            ),
+            session_id=session_id,
+        )
+        terminal: dict[str, Any] | None = None
+        output_parts: list[str] = []
+        async for event in client.events(run_id):
+            if event.get("event") == "message.delta" and isinstance(event.get("delta"), str):
+                output_parts.append(event["delta"])
+            if str(event.get("event") or "").startswith("run."):
+                terminal = event
+        terminal = terminal or await client.status(run_id)
+        status = str(terminal.get("status") or terminal.get("event", "")).removeprefix("run.")
+        if status != "completed":
+            raise RuntimeError(str(terminal.get("error") or f"Reviewer ended with {status}"))
+        experiment["review"] = {
+            "session_id": session_id,
+            "hermes_run_id": run_id,
+            "output": redact_text("".join(output_parts) or _terminal_output(terminal)),
+        }
+        self.store.save_experiment(experiment)
+        return experiment

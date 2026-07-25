@@ -1,19 +1,28 @@
-# Application contract
+# Hermes App Pack V2 contract
 
-The candidate root contains `app.yaml`, `profiles/`, and `scenarios/`.
+The candidate root contains `app.yaml`, Profile Distributions, Cases, and optional contracts.
 
-`app.yaml` contains only:
+`app.yaml` uses `schema_version: 2` and contains stable facts only:
 
-- `schema_version: 1`;
-- kebab-case application `id` and `display_name`;
-- one declared `entry_profile`;
-- a list of namespaced Profile Distribution source paths;
-- explicit `allowed_calls` between declared Profiles;
-- `scenarios_dir` and optional descriptive text.
+- kebab-case Pack `id` and version;
+- one logical public `entry` Agent;
+- logical `agents` mapped to relative Profile Distribution paths and exposure;
+- `allowed_calls` as a permission boundary, never a routing rule;
+- required collaboration primitives;
+- native OpenAI-compatible public endpoints;
+- `stateless`, `session_only`, or `caller_scoped` state policy;
+- relative Case and contract paths.
 
-Never add `steps`, `workflow`, `if`, `else`, `route_when`, `parallel`, `fan_out`, `aggregate`, `judge`, or business retry policy.
+Never add steps, workflow, if/else, route predicates, parallel branches, fan-out, aggregation,
+judging, prompt chains, or business retries. Cases describe input, initial state, explicit Memory
+policy, a small set of outcome assertions, and a human review prompt. They do not prescribe Agent
+steps.
 
-Each Profile source must contain `distribution.yaml`, `SOUL.md`, `config.yaml`, and the minimal owned Skills/tools. Use `${ATELIER_PROJECT_ROOT}` for a repository path in versioned source; the installed runtime receives the absolute value. Never place Endpoint, port, PID, API key, Memory, Session, logs, or runtime state in the candidate.
+Every logical Agent is a complete local Hermes Profile Distribution. Business SOUL and Skills use
+logical IDs, never installed physical Profile names. If `profile_call` is selected, callers use
+logical targets and the release process embeds the independent Plugin. Do not depend on Atelier,
+`.atelier`, Atelier Sessions, an Endpoint registry, a PID manager, or `atelier_call`.
 
-The entry Profile decides whether a call is useful. `atelier_call` accepts a target, complete task, optional stable Memory scope, and timeout. Do not ask Atelier to choose, route, sequence, retry, aggregate, judge, or summarize specialists.
-
+Do not place API keys, `.env`, Memory, Sessions, traces, PID files, logs, `local/`, or runtime
+configuration in the candidate. Missing integrations remain explicit; deterministic mock tools
+must identify their output as simulated.

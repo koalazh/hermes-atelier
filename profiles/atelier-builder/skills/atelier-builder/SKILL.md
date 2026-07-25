@@ -1,43 +1,40 @@
 ---
 name: atelier-builder
-description: Align a business intent and create a minimal, complete Hermes Profile application in the exact Atelier draft directory. Use when the Atelier Build backend supplies a BUILD.md contract and asks for an application proposal.
+description: Align a Hermes App Pack goal over multiple planning turns, or generate a V2 Draft only when the explicit Draft-stage prompt supplies a writable directory.
 ---
 
-# Atelier Builder
+# Atelier Builder V2
 
-Read `BUILD.md` and the supplied original request. Inspect the current draft, repository conventions, and available Hermes capabilities before choosing boundaries.
+During planning, investigate and return a complete current `PLAN.md` in the response. Do not
+write application files. Ask focused questions only when an answer materially changes the goal,
+safety boundary, Profile split, real integration, public contract, state policy, or acceptance
+evidence. Otherwise make a reversible, disclosed assumption.
 
-Keep `BUILD.md` current under these headings:
+The plan is a decision anchor, not a workflow. It should cover the aligned outcome, users and
+inputs, expected result, justified Profile boundaries, tools and data, Memory/Skill/Session
+ownership, collaboration primitive, public HTTP contract, Cases, missing real integrations, and
+risks. Sections may vary when the application does not need one.
 
-- Original Request
-- Aligned Goal
-- Users and Inputs
-- Expected Output
-- Profile Boundaries
-- Tools and Data
-- Memory and Skill Ownership
-- HTTP Collaboration
-- Observability Needs
-- Acceptance Scenarios
-- Missing Real Integrations
-- Risks
-- Status
+Start every planning response with exactly `DESIGN_STATUS: NEEDS_INPUT` while material questions
+remain, or `DESIGN_STATUS: PLAN_READY` when the remainder of the response is the complete current
+plan. Never mark a list of unanswered questions as ready.
 
-Ask focused questions in your response only when a missing fact materially changes the goal, safety boundary, Profile split, required real integration, or acceptance result. Otherwise make a reversible, disclosed assumption and proceed.
+Use only the current Session. Never search prior Sessions or reuse another Design's requirement,
+plan, filesystem path, assumptions, or generated files.
 
-Before splitting a Profile, record at least one concrete justification from the boundary rubric in [references/profile-boundaries.md](references/profile-boundaries.md). Do not use familiar names such as Router, Researcher, or Reviewer as a substitute for evidence.
+Before splitting a Profile, record a concrete justification from
+[references/profile-boundaries.md](references/profile-boundaries.md). A single Profile is the
+default. Do not select familiar role names as a substitute for a real permission, knowledge,
+workspace, failure, model, evolution, reuse, or context boundary.
 
-Create exactly one candidate application below the supplied draft directory. Follow [references/application-contract.md](references/application-contract.md). Every Profile must be a valid local Hermes Distribution with its own SOUL, config, and only the Skills it owns. Profile names are `<app-id>--<role>` and all cross-Profile calls use `atelier_call`.
+Only an explicit Draft-stage prompt supplies a writable directory. In that stage, read the
+approved plan from the prompt, create exactly one App Pack beneath the supplied directory, and
+follow [references/application-contract.md](references/application-contract.md). Generating a
+Draft does not adopt, install, start, commit, or approve it.
 
-Design acceptance scenarios that test meaningful variation, including when the entry Profile should not call a specialist, may call one, and may call more than one when the application naturally permits it. Keep business-specific tools, examples, prompts, routes, and evaluation criteria in the application assets.
+Before stopping in Draft stage:
 
-Before stopping:
-
-1. validate every `distribution.yaml`, `config.yaml`, Skill, and `app.yaml`;
-2. ensure `app.yaml` has no workflow or routing language;
+1. validate every Distribution, Profile config, Skill, Plugin, Case, contract, and `app.yaml`;
+2. keep workflow and routing behavior out of `app.yaml` and Cases;
 3. list missing real integrations and credentials without fabricating them;
-4. set `BUILD.md` Status to `AWAITING_APPROVAL`;
-5. summarize the proposed boundaries and evidence, without claiming approval, installation, health, or smoke success.
-
-The backend performs promotion, Profile installation, runtime secret creation, Gateway startup, smoke execution, and registration only after explicit human approval.
-
+4. report exactly what was generated and what was not run.

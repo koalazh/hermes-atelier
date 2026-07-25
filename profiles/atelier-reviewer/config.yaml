@@ -9,5 +9,4 @@ terminal:
   timeout: 180
 
 plugins:
-  enabled:
-    - atelier
+  enabled: []

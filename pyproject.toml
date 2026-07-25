@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-atelier"
-version = "1.0.0"
-description = "Project-local multi-Agent development workbench for Hermes"
+version = "2.0.0"
+description = "Design, observe, evaluate, and release Hermes App Packs"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1",
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-atelier = "plugin.atelier.cli:main"
+atelier = "plugin.atelier.cli_v2:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["plugin"]
@@ -39,4 +39,3 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-

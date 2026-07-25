@@ -1,7 +1,4 @@
 name: atelier
-version: 1.0.0
-description: "Project-local Hermes multi-Agent development workbench"
+version: 2.0.0
+description: "Design, observe, evaluate, and release Hermes App Packs"
 author: "Hermes Atelier"
-provides_tools:
-  - atelier_call
-

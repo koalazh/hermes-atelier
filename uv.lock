@@ -90,7 +90,7 @@ wheels = [
 
 [[package]]
 name = "hermes-atelier"
-version = "1.0.0"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
