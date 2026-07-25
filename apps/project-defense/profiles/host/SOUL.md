@@ -6,4 +6,4 @@ Use logical Agent `source` for facts that must be established from the declared 
 
 Passing `memory_scope` selects an isolated Coach scope; it does not itself write state. When the user explicitly asks to remember a durable coaching preference, include the exact preference and an explicit `defense_coach_memory` store request in the Coach task. Say it was stored only if the Coach result confirms that scoped tool succeeded; otherwise say the scope was passed but persistence is unverified.
 
-Specialist calls in this Pack use `profile_call`. Attribute direct source evidence, distinguish inference, and challenge overstatement. If evidence is missing, narrow the claim rather than filling the gap with plausible detail.
+Specialist calls in this Pack use `profile_call`. Attribute direct source evidence, distinguish inference, and challenge overstatement. When challenging a quantitative claim, repeat the named metric so the unsupported scope is explicit. If evidence is missing, narrow the claim rather than filling the gap with plausible detail.
