@@ -1,52 +1,146 @@
-# Hermes Atelier V2.1
+# Hermes Atelier
 
-Hermes Atelier 是面向 Hermes 应用的本地开发工坊。它帮助开发者对齐业务意图、把实现交给合适的 Coding Agent、理解一组 Profiles，并交付可脱离 Atelier、通过 OpenAI-compatible HTTP 调用的 App Pack。
+**把一句业务需求，交接给 Coding Agent 实现成一组 Hermes Profiles，并最终交付为其他系统可通过 HTTP 调用的应用。**
+
+例如，你想做一个“能判断客户反馈属于产品问题还是退款问题，并在需要时查询对应专家”的助手。Hermes Atelier 帮你完成的不是一次聊天，而是下面这套可交付结果：
+
+- 与 Builder 多轮讲清目标、边界和验收条件；
+- 导出 `PLAN.md` 和 `IMPLEMENTATION_HANDOFF.md`，交给 Codex、Claude Code、Hermes 或人工实现；
+- 把实现组织成可验证的 App Pack；
+- 用 Hermes 原生 Profile、Session、Gateway 运行；
+- 交付一个不依赖 Atelier 的 OpenAI-compatible HTTP 服务。
+
+Atelier 是开发工坊，不是应用 Runtime。Dashboard 关闭、`.atelier` 删除、Builder 未安装时，已经交付的应用仍由 Hermes 独立运行。
+
+## 先理解完整链路
 
 ```text
-Design through conversation
-Run through Hermes
-Hand off to a Coding Agent
-Observe what is available
-Deliver through App Packs
+业务需求
+   │
+   ▼
+Atelier Builder 多轮对齐
+   │  产出 PLAN.md + IMPLEMENTATION_HANDOFF.md
+   ▼
+你选择的 Coding Agent 实现
+   │  产出 apps/<pack-id>/
+   ▼
+Atelier 验证并打包 App Pack
+   │  产出可搬走的 release 目录
+   ▼
+Consumer 用 Hermes 安装并启动 Profiles
+   │
+   ▼
+其他系统通过 /v1/chat/completions 或 /v1/responses 调用
 ```
 
-Atelier 不拥有 Agent Loop、Session、Memory、Profile 生命周期、Gateway、模型路由、通用 Chat、任务队列、Workflow 或生产部署。发布应用只依赖 Hermes、Pack 内资产，以及应用自行选择的协作原语。
+这里有三个不同角色：
 
-## 核心路径
+| 角色 | 负责什么 | 不负责什么 |
+| --- | --- | --- |
+| Hermes Atelier | 需求对齐、Coding Agent handoff、App Pack 验证、交付说明和可选证据 | 不运行 Agent Loop，不管理生产部署 |
+| Coding Agent | 根据 handoff 编写 Profile、Skill、Plugin、Case 和 App Pack 文件 | 不替用户决定未对齐的业务目标 |
+| Hermes | Profile、模型、工具、Session、Memory、Gateway 和真实请求运行 | 不替 Atelier 定义应用交付边界 |
 
-### Design
+## 我应该从哪里开始
 
-Builder 使用 Hermes 原生多轮 Session 对齐需求，默认产出：
+### 我只想先看看它能不能跑
 
-- `PLAN.md`：业务目标和设计决策；
-- `IMPLEMENTATION_HANDOFF.md`：给 Codex、Claude Code、Hermes、其他 Coding Agent 或人工实现者的边界、数据、权限、状态归属、交付合同、Cases、真实缺口与非目标。
-
-默认动作是 `Export handoff`。`Generate with Hermes` 只是可选 Drafter；其 `terminal.cwd` 是工作目录提示，不是安全沙箱，生成结果仍须经过 App Pack Validator，也不会被自动采纳、安装或提交。
-
-### Native Hermes Run
-
-运行与对话直接使用 Hermes Chat、Session、`/v1/responses`、`/v1/chat/completions` 或 `/v1/runs`。Dashboard 只发现最近入口 Sessions 并链接/展示可见证据，不重新实现 Session 管理。
-
-需要同步 Profile HTTP 调用时可以选择独立 `profile_call` Plugin。Trace 上报使用独立 Client 和极短 timeout；失败不会延迟 dispatch 或覆盖业务结果。Lens 区分 `complete_trace`、`partial_trace` 和 `unobserved_collaboration_possible`，没有 Trace 不表示没有 delegation、Kanban、MCP 或其他协作。
-
-### App Pack 与 HTTP Delivery
-
-App Pack 保持 Schema V2：逻辑 Agents、唯一 entry、Distribution、调用声明、公开 HTTP、状态声明、Cases 和 Contracts。它不包含模型、端口、Secret、部署或 Workflow。
-
-Dashboard 以 Pack 为中心展示 Overview、Design、Sessions & Evidence、Cases、Delivery 和可选 Assurance Lab。Delivery 给出安装命令、入口 HTTP、示例调用、证据等级与限制。
-
-### 可选 Assurance Lab
-
-Runtime attestation、live probe、Case runner、Experiment、多 Trial、Git candidate、Reviewer、update/rollback 和供应链检查都在 Assurance Lab。普通 Demo 不必先理解或完成这些步骤。证据阶梯为：
-
-`packed → installed → configured → runtime_attested → live_probed → cases_passed → fresh_verified`
-
-层级可以缺失，`packed` 绝不等于“已验证发布”。
-
-## 安装开发环境
+从最小单 Profile 示例开始。它不需要 Builder、Dashboard 或 `profile_call`：
 
 ```bash
-cd /absolute/path/to/hermes-atelier
+uv sync --extra dev
+uv run atelier validate apps/single-profile-hello
+uv run atelier release \
+  apps/single-profile-hello \
+  /tmp/single-profile-hello-release \
+  --git-revision HEAD
+```
+
+然后进入 release 目录，使用 `./app install/configure/start` 启动 Hermes Gateway，并用 curl 调用。完整、可复制的命令见[首次上手：路径 A](docs/GETTING_STARTED.md#路径-a先跑通一个已存在的-app-pack)。
+
+### 我想从自己的需求创建应用
+
+按下面的主路径走：
+
+1. 安装 Atelier Dashboard Plugin 和只读 Builder Profile；
+2. 在 Dashboard 的 **Atelier → Design** 输入原始需求；
+3. 与 Builder 多轮确认目标，直到得到 PLAN 和 handoff；
+4. 默认选择 **Export handoff**，交给你信任的 Coding Agent；
+5. Coding Agent 在 `apps/<pack-id>/` 实现 App Pack；
+6. 执行 validate、release、install、start；
+7. 用普通 OpenAI-compatible HTTP 调用入口 Profile。
+
+从安装 Builder 到首个 HTTP 请求的完整说明见[首次上手：路径 B](docs/GETTING_STARTED.md#路径-b从自己的业务需求创建应用)。
+
+## 你最终会得到什么
+
+一个 App Pack 是一个普通目录，而不是运行中的平台对象：
+
+```text
+apps/<pack-id>/
+├── app.yaml                 # 应用入口、Profiles、调用与状态声明
+├── README.md                # 业务说明
+├── INSTALL.md               # Consumer 安装和 HTTP 使用方式
+├── profiles/                # Hermes Profile Distributions
+├── cases/                   # 可选验收 Cases
+└── contracts/               # 可选公共输出合同
+```
+
+`atelier release` 会生成可独立搬运的 release。接收方只需要 Hermes、模型凭据和 release 内资产，不需要仓库、Dashboard、`.atelier`、Builder、Drafter 或 Reviewer。
+
+## 最短日常工作流
+
+```bash
+# 1. Coding Agent 完成实现后，检查 Pack 结构
+uv run atelier validate apps/<pack-id>
+
+# 2. 查看已声明的 Cases；需要时再真实运行
+uv run atelier cases apps/<pack-id>
+
+# 3. 生成不可变交付目录，目标目录必须尚不存在
+uv run atelier release \
+  apps/<pack-id> \
+  /absolute/path/to/<pack-id>-release \
+  --git-revision HEAD
+
+# 4. Consumer 在 release 目录安装并启动
+cd /absolute/path/to/<pack-id>-release
+./app install --instance <instance-name>
+./app configure --instance <instance-name> [模型和 Gateway 参数]
+./app start --instance <instance-name>
+```
+
+每个 Pack 生成的 `INSTALL.md` 会给出它自己的 Profile 名、端口和完整 HTTP 示例。不要从其他 Pack 猜这些值。
+
+## Core 与 Assurance Lab
+
+第一次做 Demo 只需要 Core：
+
+`Design → Coding Agent handoff → App Pack → Hermes Run → HTTP Delivery`
+
+以下能力都不是启动应用的前置条件，它们只在需要更高可信度时使用：
+
+- configured runtime attestation 与 live probe；
+- Case、Experiment、多 Trial 和 Reviewer；
+- Candidate Git binding 与 release provenance；
+- update/rollback、Secret 和供应链检查。
+
+Dashboard 中这些能力统一放在 **Assurance Lab**。证据等级只说明已经获得哪些证据，`packed` 不等于“生产可用”，没有 Trace 也不等于 Agent 没有协作。
+
+## 四个可以参考的 App Packs
+
+| Pack | 适合学习什么 |
+| --- | --- |
+| `apps/single-profile-hello` | 最小单 Profile HTTP 应用，不安装 `profile_call` |
+| `apps/mini-voc` | 一个入口按业务需要调用两个专家 |
+| `apps/project-defense` | 带源码证据、工具和 caller scope 的多 Profile 应用 |
+| `apps/delegation-note` | 使用 Hermes 原生 delegation，不依赖固定 Trace 调用树 |
+
+如果你第一次实现新 Pack，先复制 `single-profile-hello` 的目录心智模型，而不是从最复杂的 Assurance 能力开始。
+
+## 开发仓库
+
+```bash
 uv sync --extra dev
 uv run pytest -q
 uv run ruff check .
@@ -54,117 +148,21 @@ node --check plugin/atelier/dashboard/dist/index_v2.js
 uv build
 ```
 
-当前验证基线是 Hermes 0.19.0；版本字符串不能替代 `/health`、`/health/detailed`、`/v1/capabilities` 与 `/v1/models` 的 live probe。
+当前验证基线为 Hermes 0.19.0。Atelier 不修改 Hermes 核心。
 
-## 验证与发布一个 Pack
+## 按任务查文档
 
-示例不会默认安装或启动：
+- **第一次跑通或创建应用**：[GETTING_STARTED.md](docs/GETTING_STARTED.md)
+- **理解产品边界和职责**：[PROJECT.md](docs/PROJECT.md)
+- **理解 Builder、handoff、Drafter 和 Reviewer**：[BUILDER.md](docs/BUILDER.md)
+- **编写 `app.yaml` 和 App Pack**：[APP_PACK.md](docs/APP_PACK.md)
+- **发布、安装、HTTP 调用和停止**：[RELEASE.md](docs/RELEASE.md)
+- **选择跨 Profile 协作方式**：[PROFILE_CALL.md](docs/PROFILE_CALL.md)
+- **需要 Case 或 Experiment 时**：[CASES_AND_EXPERIMENTS.md](docs/CASES_AND_EXPERIMENTS.md)
+- **理解安全边界**：[SECURITY.md](docs/SECURITY.md)
+- **查看真实验证记录**：[VALIDATION.md](docs/VALIDATION.md)
+- **从 V1 迁移**：[MIGRATION_FROM_V1.md](docs/MIGRATION_FROM_V1.md)
 
-```bash
-uv run atelier validate apps/mini-voc
-uv run atelier cases apps/mini-voc
-uv run atelier release apps/mini-voc /tmp/mini-voc-release --git-revision HEAD
-```
+## 当前不提供什么
 
-接收方不需要 Atelier。以 Mini VOC 为例：
-
-```bash
-cd /tmp/mini-voc-release
-export HERMES_HOME=/absolute/fresh/hermes-home
-export DEEPSEEK_API_KEY='set-in-your-shell'
-export HERMES_APP_API_KEY='use-a-long-random-secret'
-
-./app install --instance support-demo
-./app configure \
-  --instance support-demo \
-  --model deepseek-v4-flash \
-  --model-base-url https://api.deepseek.com \
-  --model-key-env DEEPSEEK_API_KEY \
-  --gateway-key-env HERMES_APP_API_KEY \
-  --gateway-port 19300
-./app start --instance support-demo
-./app status --instance support-demo
-```
-
-每个物理 Profile 使用 Hermes 原生 Gateway。wrapper 提供统一默认模型的便利配置，但 Consumer 可以随后用 `hermes -p <profile> config set ...` 单独覆盖；Manifest 不承担模型管理。attestation 按 Profile 记录配置，live probe 只报告实际可确认的信息。
-
-入口 HTTP 调用：
-
-```bash
-curl http://127.0.0.1:19300/v1/chat/completions \
-  -H "Authorization: Bearer $HERMES_APP_API_KEY" \
-  -H 'Content-Type: application/json' \
-  -H 'X-Hermes-Session-Id: consumer-session-001' \
-  -d '{"model":"support-demo--dispatcher","messages":[{"role":"user","content":"登录验证码很晚，而且订单 ORD-1001 的退款状态是什么？"}]}'
-```
-
-只应把入口端口加入 ingress。configure 为每个目标生成独立 Gateway Key，调用方只获得 self 与允许目标的映射和 Key；这减少误用，但同一 OS 用户下不是强进程隔离，`allowed_calls` 应理解为 Tool Policy 与凭据最小化。
-
-停止：
-
-```bash
-./app stop --instance support-demo
-```
-
-`INSTALL.md` 应同时给出不使用 wrapper 的 Hermes 原生命令，避免 CLI 锁定。
-
-## 更新语义
-
-```bash
-./app update --instance support-demo
-```
-
-update/rollback 保留为 local、best-effort、experimental。它执行 preflight、重装、映射重建和 smoke，失败时尝试恢复，但不宣称事务原子、蓝绿、远程发布、流量切换或多主机一致性。
-
-## 四个回归 App Packs
-
-- `apps/mini-voc`：入口自主选择不调用、调用 product、transaction 或两者；回答遵循半结构化语义约束，状态为 `session_only`。
-- `apps/project-defense`：入口按需调用 source、architecture、coach；源码插件和样例源码随 source Distribution 发布，状态为 `caller_scoped`，升级需 `review_required`。
-- `apps/single-profile-hello`：单 Profile、空 `allowed_calls`，不安装 `profile_call`。
-- `apps/delegation-note`：使用 Hermes 原生 delegation，Pack 和 Case 不依赖固定调用树。
-
-Atelier 核心没有任何 VOC 或答辩业务分支。
-
-## Studio 配置
-
-Dashboard Plugin V2 只读取下列运行态环境变量，不保存 Secret：
-
-```bash
-export ATELIER_BUILDER_URL=http://127.0.0.1:19400
-export ATELIER_BUILDER_KEY_ENV=ATELIER_BUILDER_API_KEY
-# 以下仅在选择可选能力时需要
-export ATELIER_DRAFTER_URL=http://127.0.0.1:19401
-export ATELIER_REVIEWER_URL=http://127.0.0.1:19402
-```
-
-Builder、Drafter、Reviewer 的安装和 Gateway 生命周期由 Hermes 管理。只有 Builder 是 Design 所需；Drafter 和 Reviewer 都不是 Core 启动依赖。
-三个 Atelier Profile 不预设模型；安装后用 Hermes 原生 Models/config 为每个
-Profile 单独配置 Provider、model 和凭据引用。Atelier 不把它们写入 App Pack。
-
-## 状态与安全
-
-- `.atelier/v2/designs/`：Design 对话索引、PLAN、handoff 与可选 Draft；
-- `<HERMES_HOME>/app-packs/<instance>/call-traces/`：已安装实例按 Session 分区的 best-effort `profile_call` 证据；`.atelier/v2/traces/` 仅保留兼容的显式 HTTP Sink 事件；
-- `.atelier/v2/experiments/`：冻结的 Experiment 开发证据；
-- Consumer Profile `.env`：Secret；
-- Consumer Profile `local/app-runtime.json`：无 Secret 的逻辑映射；
-- Hermes Profile 目录：Memory、Sessions、Run、PID 与日志。
-
-删除 Atelier Dashboard 或 `.atelier` 不影响已经发布和安装的应用。真实密钥不得进入源码、测试 fixture、日志、Trace、`app.lock`、文档或 Git。
-
-## 文档
-
-- [项目定位](docs/PROJECT.md)
-- [V2 架构](docs/ARCHITECTURE.md)
-- [App Pack 合同](docs/APP_PACK.md)
-- [profile_call](docs/PROFILE_CALL.md)
-- [Case 与 Experiment](docs/CASES_AND_EXPERIMENTS.md)
-- [发布和更新](docs/RELEASE.md)
-- [V2.1 核心重聚焦审计](docs/V2_1_CORE_REFOCUS.md)
-- [V1 迁移](docs/MIGRATION_FROM_V1.md)
-- [V2 审计计划](docs/V2_REFACTOR_PLAN.md)
-- [验证记录](docs/VALIDATION.md)
-
-## 已知边界
-
-V2.1 是本地开发工坊，不提供多租户、企业 RBAC、生产 Trace、远程 Agent Mesh、蓝绿发布或自动优化。Atelier Lens 不是完整分布式 Trace；`terminal.cwd` 不是沙箱；相同 OS 用户下的 Key 文件不是进程隔离。真实模型 smoke 只证明链路可执行。
+Hermes Atelier V2.1 不提供生产部署、多租户、企业 RBAC、远程 Registry、流量切换或完整分布式 Trace。`allowed_calls` 是正常工具路径上的策略与凭据最小化，不是 OS/网络隔离；update/rollback 是 local、best-effort、experimental。
