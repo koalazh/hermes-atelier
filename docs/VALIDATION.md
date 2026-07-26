@@ -66,7 +66,11 @@ Dashboard 未启动且 release 目录中没有 `.atelier`、Builder、Drafter �
 - Core 与 Assurance Lab 在导航和操作上分区；
 - 页面 console 无 warning/error。
 
-真实 workspace API 还确认四个 Pack 会自动发现实例和最近 Sessions；为 `smoke-delegation-v21` 写入一条可见 `profile_call` 事件后，Lens 返回 `partial_trace`，并明确原生 delegation、Kanban 或 MCP 协作可能不可见。恢复浏览器时 Chromium 落入 `ERR_CONNECTION_REFUSED` 数据页，浏览器控制策略禁止以脚本 URL 或其他浏览器表面绕过，因此本轮没有伪造“再次点击 Sessions 页”的可见证据；该部分由真实 Dashboard API 和确定性 UI 测试覆盖。浏览器已确认的可见范围与 API 验证范围在这里分别记录。
+真实 workspace API 还确认四个 Pack 会自动发现实例和最近 Sessions。初轮验收曾向 Studio Store 人工写入一条事件来检查 `partial_trace` 文案；独立完成检视指出这不能证明 Lens 接通 App Pack 的实例 Trace，因此不计作最终运行证据。修复后 Session API 携带自动发现的 instance，并由回归测试从该实例真实哈希 Trace 文件读到 `partial_trace`；文案继续明确原生 delegation、Kanban 或 MCP 协作可能不可见。恢复浏览器时 Chromium 落入 `ERR_CONNECTION_REFUSED` 数据页，浏览器控制策略禁止以脚本 URL 或其他浏览器表面绕过，因此本轮没有伪造“再次点击 Sessions 页”的可见证据；浏览器已确认的可见范围与修复后 API/确定性验证范围在这里分别记录。
+
+## 对抗式检视后的定向复验
+
+四位独立审查者发现的 12 个 P1 全部修复，详见 `V2_1_COMPLETION_REVIEW.md`。从修复后干净提交新建 Single Profile release，在全新 `HERMES_HOME` 使用摘要化独立 Key env 完成 install、configure、start、普通 OpenAI-compatible HTTP、configured attestation、live probe 和 1/1 Case；evidence ladder 达到 `fresh_verified`，Profile identity 仍诚实标为 `unverified`。随后停止并卸载本任务全部 Gateway/launchd 条目和 Dashboard，删除任务 runtime、临时 release 与人工 Trace；用户既有 `.atelier` Design/Experiment 数据未删除。
 
 ## Schema、状态与发布语义
 
