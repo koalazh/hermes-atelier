@@ -4,7 +4,6 @@ memory_policy: new_session
 assertions:
   calls:
     required: [product]
-    forbidden: [transaction]
   output:
     must_contain: [PRD-LOGIN-17]
 human_review: 应把模拟记录与真实生产集成明确区分。

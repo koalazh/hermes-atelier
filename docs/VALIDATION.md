@@ -13,13 +13,13 @@ V2.1 的默认路径是 Design → Coding Agent Handoff → Native Hermes Run �
 最终回归使用仓库当前 `uv` 环境执行：
 
 - `uv sync --extra dev`；
-- `uv run pytest -q`：79 个测试通过；
+- `uv run pytest -q`：85 个测试通过；
 - `uv run ruff check .`；
 - Dashboard `index_v2.js` 执行 `node --check`；
 - `uv build` 从 sdist 正常构建 wheel；
 - `git diff --check`。
 
-测试覆盖 Trace 慢/失败不阻塞业务、timeout/cancellation 后 best-effort stop 及三态结果、Case 不改共享 Mapping、每目标独立 Key、partial trace、configured/live attestation、证据阶梯、旧 Case policy 兼容、Single Profile Pack、非 `profile_call` Pack，以及 V1 模块不进入 V2 wheel。重复 attestation/probe 还会验证持久化 evidence level 不重复。
+测试覆盖 Trace 慢/失败不阻塞业务、持续 SSE 也不能绕过总 timeout、timeout/cancellation 后 best-effort stop 及三态结果、Case 不改共享 Mapping、权限收缩移除旧 Key、合法 Agent ID 的 Key env 不碰撞、partial trace、configured/live attestation、损坏 evidence 文件不晋级、旧 Case policy 兼容、Single Profile Pack、非 `profile_call` Pack，以及 V1 模块不进入 V2 wheel。重复 attestation/probe 还会验证持久化 evidence level 不重复。
 
 ## 真实 Hermes smoke
 
@@ -42,7 +42,7 @@ Dashboard 未启动且 release 目录中没有 `.atelier`、Builder、Drafter �
 
 在真实 `profile_call` 链路中验证：
 
-- Trace Sink 故意延迟 5 秒时，业务调用成功且 `trace_degraded=true`；独立 0.2 秒 Trace timeout 没有等待 Sink 完成；
+- Trace Sink 故意延迟 5 秒时，业务调用成功且 `trace_degraded=true`；独立 0.2 秒 Trace timeout 没有等待 Sink 完成；持续产生 SSE 的子 Run 也受总 deadline 限制；
 - Trace Sink 不可连接时，业务调用仍成功且明确降级；
 - 目标 Run timeout 为 1 秒时，调用方约 1.1 秒返回错误并报告 `stop_requested`，没有把已发送请求伪装成 `stop_confirmed`；
 - 单测另外覆盖 caller cancellation、SSE 断开、网络错误和事件解析失败后的 stop；
@@ -52,7 +52,7 @@ Dashboard 未启动且 release 目录中没有 `.atelier`、Builder、Drafter �
 
 真实 Builder 使用同一 Hermes Session 进行多轮需求对齐。首次生成暴露了两个实际问题：Profile 中 `${ATELIER_MODEL}` 不会被 launchd Gateway 按预期解析，且 provider HTTP 错误可能被误报为缺少 `DESIGN_STATUS`。修复后 Builder/Drafter/Reviewer 不再携带 Atelier 统一模型配置，模型由 Hermes 原生 Profile 配置拥有；provider 4xx/5xx 会直接呈现。
 
-最终 Design `f808e1d189804077b35db043381211e7` 达到 `plan_ready`，同时输出 `PLAN.md` 与 `IMPLEMENTATION_HANDOFF.md`。handoff 包含原始需求、对齐目标、Profile 边界、工具/权限、Session/Memory/Skill 归属、推荐协作原语、Pack 与 HTTP 边界、Cases、未接入系统和非目标，并通过冻结 V2 schema 检查。历史 Design `447e45d94b1144689f0d2ac9bf6b1015` 可从 Dashboard 恢复。
+最终 Design `f808e1d189804077b35db043381211e7` 达到 `plan_ready`，同时输出 `PLAN.md` 与 `IMPLEMENTATION_HANDOFF.md`。handoff 包含原始需求、对齐目标、Profile 边界、工具/权限、Session/Memory/Skill 归属、推荐协作原语、Pack 与 HTTP 边界、Cases、未接入系统和非目标，并通过冻结 V2 schema 检查。历史 Design `447e45d94b1144689f0d2ac9bf6b1015` 可从 Dashboard 恢复，即使当前 Builder Gateway/Secret 不可用；新 Design 的 Start 操作会直接发送原始需求，不要求用户重复一次。
 
 默认动作是 Export handoff；Generate with Hermes 是可选 Drafter 路径。Drafter 的 `terminal.cwd` 明确不是安全沙箱，输出仍须经过 App Pack Validator，且不会自动安装、采纳或提交。Reviewer 同样只在 Assurance Lab 中可选运行。
 
@@ -70,7 +70,7 @@ Dashboard 未启动且 release 目录中没有 `.atelier`、Builder、Drafter �
 
 ## Schema、状态与发布语义
 
-- App Pack schema 保持 V2 冻结，没有加入模型、端口、Secret、部署或 Workflow 字段；Pydantic 继续 `extra="forbid"`；递归理念关键词黑名单已删除。
+- App Pack schema 保持 V2 冻结，没有加入模型、端口、Secret、部署或 Workflow 字段；Pydantic 继续 `extra="forbid"`；递归理念关键词黑名单已删除。`calls.forbidden` 仅兼容读取：观察到可判失败，未观察到只能 `unverified`，不能因 Trace 缺失而假通过。
 - 新写入使用 `new_session`、`retained_scope`、`fresh_instance` 和 `evaluation_context`；旧 `clean`、`session_only`、`retained`、`initial_state` 仅兼容读取。
 - `new_session` 只承诺新 Hermes Session；只有新物理 Profile/HERMES_HOME 才能形成 `fresh_instance`。
 - evidence ladder 为 `packed → installed → configured → runtime_attested → live_probed → cases_passed → fresh_verified`，不要求每级都存在，也不把 Pack 称为 Validated release。

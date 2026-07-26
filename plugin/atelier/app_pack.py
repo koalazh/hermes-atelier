@@ -209,40 +209,6 @@ class AppPack:
                 raise ValueError(f"JSON Contract must contain an object: {relative}")
         return cls(root, manifest)
 
-    def runtime_mapping(
-        self,
-        *,
-        instance: str,
-        agent_base_urls: dict[str, str],
-        api_key_env: str,
-        current_agent: str,
-        trace: dict[str, str] | None = None,
-    ) -> dict[str, Any]:
-        if not LOGICAL_ID_RE.fullmatch(instance) or current_agent not in self.manifest.agents:
-            raise ValueError("invalid instance or current logical Agent")
-        if set(agent_base_urls) != set(self.manifest.agents):
-            raise ValueError("agent base URLs must cover every logical Agent")
-        mapping: dict[str, Any] = {
-            "schema_version": 1,
-            "pack_id": self.manifest.id,
-            "pack_version": self.manifest.version,
-            "instance": instance,
-            "current_agent": current_agent,
-            "agents": {
-                agent_id: {
-                    "profile": f"{instance}--{agent_id}",
-                    "base_url": agent_base_urls[agent_id].rstrip("/"),
-                    "api_key_env": api_key_env,
-                }
-                for agent_id in self.manifest.agents
-            },
-            "allowed_calls": self.manifest.allowed_calls,
-        }
-        if trace:
-            mapping["trace"] = trace
-        return mapping
-
-
 def _file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 

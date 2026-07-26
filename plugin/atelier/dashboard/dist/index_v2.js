@@ -165,6 +165,7 @@
   function SessionsEvidence(props) {
     var workspace = props.workspace;
     var sessions = workspace.sessions || [];
+    var instance = workspace.session_discovery.instance || "";
     var sessionsKey = sessions.map(function (item) { return item.id || item.session_id || ""; }).join("|");
     var sessionState = useState(sessions[0] ? (sessions[0].id || sessions[0].session_id || "") : "");
     var sessionId = sessionState[0];
@@ -181,8 +182,8 @@
     }, [sessionsKey]);
     useEffect(function () {
       if (!sessionId) return;
-      json("/sessions/" + encodeURIComponent(sessionId) + "/traces").then(setLens).catch(function (value) { setError(value.message); });
-    }, [sessionId]);
+      json("/sessions/" + encodeURIComponent(sessionId) + "/traces?instance=" + encodeURIComponent(instance)).then(setLens).catch(function (value) { setError(value.message); });
+    }, [sessionId, instance]);
 
     return h("div", { className: "atelier-grid playground" },
       h("section", { className: "atelier-card" },
@@ -236,7 +237,23 @@
     var setError = errorState[1];
     var levels = instance ? instance.evidence_levels : pack.evidence_levels;
     var entry = instance && instance.entry_base_url ? instance.entry_base_url : "http://127.0.0.1:<entry-port>";
-    var install = "./app install --instance " + (instance ? instance.instance : "<instance>");
+    var latestRelease = (workspace.releases || []).slice(-1)[0];
+    var releasePath = (released && released.path) || (latestRelease && latestRelease.path) || "<create local Pack artifact first>";
+    var instanceName = instance ? instance.instance : "<instance>";
+    var port = instance && instance.entry_base_url ? new URL(instance.entry_base_url).port : "<available-entry-port>";
+    var install = "cd " + JSON.stringify(releasePath) + "\n" +
+      "export HERMES_HOME=<consumer-hermes-home>\n" +
+      "export MODEL_API_KEY=<set-in-shell>\n" +
+      "export HERMES_APP_API_KEY=<long-random-secret>\n\n" +
+      "./app install --instance " + instanceName + "\n" +
+      "./app configure --instance " + instanceName + " \\\n" +
+      "  --model <provider-model-name> \\\n" +
+      "  --model-base-url <provider-base-url> \\\n" +
+      "  --model-key-env MODEL_API_KEY \\\n" +
+      "  --gateway-key-env HERMES_APP_API_KEY \\\n" +
+      "  --gateway-port " + port + "\n" +
+      "./app start --instance " + instanceName + "\n" +
+      "./app status --instance " + instanceName;
     var curl = "curl " + entry + "/v1/chat/completions \\\n  -H \"Authorization: Bearer $HERMES_APP_API_KEY\" \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'";
     function release() {
       setError("");
@@ -329,7 +346,7 @@
   }
 
   function AtelierApp() {
-    var overviewState = useState({ packs: [], instances: [], designs: [], experiments: [] });
+    var overviewState = useState({ packs: [] });
     var overview = overviewState[0];
     var setOverview = overviewState[1];
     var packState = useState("");

@@ -182,34 +182,35 @@ class ProfileCaller:
             if not run_id:
                 raise ProfileCallError("Hermes did not return a run_id")
             try:
-                terminal: dict[str, Any] | None = None
-                async with client.stream(
-                    "GET", f"{base_url}/v1/runs/{run_id}/events", headers=headers
-                ) as stream:
-                    stream.raise_for_status()
-                    async for line in stream.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        raw = line.removeprefix("data:").strip()
-                        if not raw:
-                            continue
-                        event = json.loads(raw)
-                        if not isinstance(event, dict):
-                            raise ProfileCallError("Hermes emitted a non-object SSE event")
-                        if _event_type(event) in {
-                            "run.completed",
-                            "run.failed",
-                            "run.cancelled",
-                        }:
-                            terminal = event
-                if terminal is None:
-                    response = await client.get(
-                        f"{base_url}/v1/runs/{run_id}", headers=headers
-                    )
-                    response.raise_for_status()
-                    terminal = response.json()
-                    if not isinstance(terminal, dict):
-                        raise ProfileCallError("Hermes returned an invalid run status")
+                async with asyncio.timeout(timeout):
+                    terminal: dict[str, Any] | None = None
+                    async with client.stream(
+                        "GET", f"{base_url}/v1/runs/{run_id}/events", headers=headers
+                    ) as stream:
+                        stream.raise_for_status()
+                        async for line in stream.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            raw = line.removeprefix("data:").strip()
+                            if not raw:
+                                continue
+                            event = json.loads(raw)
+                            if not isinstance(event, dict):
+                                raise ProfileCallError("Hermes emitted a non-object SSE event")
+                            if _event_type(event) in {
+                                "run.completed",
+                                "run.failed",
+                                "run.cancelled",
+                            }:
+                                terminal = event
+                    if terminal is None:
+                        response = await client.get(
+                            f"{base_url}/v1/runs/{run_id}", headers=headers
+                        )
+                        response.raise_for_status()
+                        terminal = response.json()
+                        if not isinstance(terminal, dict):
+                            raise ProfileCallError("Hermes returned an invalid run status")
             except asyncio.CancelledError:
                 await self._stop_cancelled_call(client, base_url, headers, run_id)
                 raise

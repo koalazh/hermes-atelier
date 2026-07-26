@@ -220,6 +220,41 @@ async def test_caller_cancellation_requests_child_stop(
 
 
 @pytest.mark.asyncio
+async def test_total_deadline_stops_child_even_when_sse_keeps_streaming(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / "local" / "app-runtime.json"
+    write_runtime(runtime)
+    monkeypatch.setenv("PROFILE_CALL_API_KEY", "runtime-only-key")
+    stop_requested = asyncio.Event()
+
+    class SlowStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            while True:
+                await asyncio.sleep(0.2)
+                yield b'data: {"event":"message.delta","delta":"still working"}\n\n'
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/v1/runs"):
+            return httpx.Response(202, json={"run_id": "run-streaming"})
+        if request.url.path.endswith("/events"):
+            return httpx.Response(200, stream=SlowStream())
+        if request.url.path.endswith("/stop"):
+            stop_requested.set()
+            return httpx.Response(202, json={"status": "stopping"})
+        raise AssertionError(request.url)
+
+    with pytest.raises(ProfileCallError) as raised:
+        await ProfileCaller(
+            runtime_path=runtime,
+            transport=httpx.MockTransport(handler),
+        ).call({"target": "product", "task": "Work", "timeout_seconds": 1})
+
+    assert raised.value.stop_status == "stop_requested"
+    assert stop_requested.is_set()
+
+
+@pytest.mark.asyncio
 async def test_retained_scope_is_hashed_into_target_session_without_leaking_raw_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

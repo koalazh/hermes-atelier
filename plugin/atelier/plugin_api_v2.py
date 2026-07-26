@@ -90,6 +90,10 @@ def _designs() -> DesignService:
     )
 
 
+def _design_reader() -> DesignService:
+    return DesignService(store, builder_base_url="", builder_api_key="")
+
+
 def _pack(pack_id: str) -> AppPack:
     root = ensure_within(apps_root() / pack_id, apps_root())
     return AppPack.load(root)
@@ -221,12 +225,7 @@ async def overview():
                     packs.append(_pack_summary(AppPack.load(child)))
                 except (ValueError, OSError):
                     continue
-    return {
-        "packs": packs,
-        "instances": _installed_instances(),
-        "designs": store.list_designs(),
-        "experiments": store.list_experiments(),
-    }
+    return {"packs": packs}
 
 
 @router.get("/packs/{pack_id}/workspace")
@@ -286,11 +285,10 @@ async def pack_workspace(pack_id: str):
     except Exception as exc:
         raise _error(exc) from exc
 
-
 @router.post("/designs", status_code=201)
 async def create_design(request: DesignCreate):
     try:
-        return _designs().create(request.requirement)
+        return await _designs().begin(request.requirement)
     except Exception as exc:
         raise _error(exc) from exc
 
@@ -298,7 +296,7 @@ async def create_design(request: DesignCreate):
 @router.get("/designs/{design_id}")
 async def get_design(design_id: str):
     try:
-        return _designs().detail(design_id)
+        return _design_reader().detail(design_id)
     except Exception as exc:
         raise _error(exc) from exc
 
@@ -336,8 +334,12 @@ async def ingest_trace(event: dict[str, Any]):
 
 
 @router.get("/sessions/{session_id}/traces")
-async def session_traces(session_id: str):
-    items = store.traces(session_id)
+async def session_traces(session_id: str, instance: str | None = None):
+    items = (
+        _runtime(instance).trace_events(instance=instance, source_session_id=session_id)
+        if instance
+        else store.traces(session_id)
+    )
     return {
         "items": items,
         "visibility": _trace_visibility(items),
@@ -457,18 +459,5 @@ async def release(pack_id: str, request: ReleaseRequest):
         destination = atelier_root() / "releases" / f"{pack_id}-{pack.manifest.version}"
         result = release_pack(pack, destination, git_revision=request.git_revision)
         return {**result, "evidence_levels": ["packed"]}
-    except Exception as exc:
-        raise _error(exc) from exc
-
-
-@router.get("/packs/{pack_id}/cases")
-async def pack_cases(pack_id: str):
-    try:
-        pack = _pack(pack_id)
-        items = []
-        for relative in pack.manifest.cases:
-            case, digest = load_case(pack.root / relative)
-            items.append({**case.model_dump(mode="json"), "hash": digest})
-        return {"items": items}
     except Exception as exc:
         raise _error(exc) from exc

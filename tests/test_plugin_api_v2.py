@@ -102,6 +102,16 @@ async def test_pack_workspace_discovers_instance_and_recent_sessions(
     }
     assert "api_key" not in str(workspace)
 
+    trace_path = runtime._case_trace_path("demo", "recent-session")
+    trace_path.write_text(
+        '{"event":"profile_call.started","call_id":"call-1",'
+        '"source_session_id":"recent-session","target":"product"}\n',
+        encoding="utf-8",
+    )
+    lens = await plugin_api_v2.session_traces("recent-session", instance="demo")
+    assert lens["visibility"] == "partial_trace"
+    assert lens["items"][0]["target"] == "product"
+
 
 def test_dashboard_bundle_exposes_app_pack_workspace_without_manual_session_id() -> None:
     bundle = (
@@ -127,4 +137,6 @@ def test_dashboard_bundle_exposes_app_pack_workspace_without_manual_session_id()
     assert "Export evidence bundle" in bundle
     assert "Review with Hermes (optional)" in bundle
     assert "Recent entry Session" in bundle
+    assert "./app configure" in bundle
+    assert "./app start" in bundle
     assert "Validated release" not in bundle

@@ -2,8 +2,6 @@ id: clarify
 input: "最近体验很差，帮我看看。"
 memory_policy: new_session
 assertions:
-  calls:
-    forbidden: [product, transaction]
   output:
     must_not_claim: [production data]
 human_review: 应追问最小必要信息，不应为显得完整而调用专家。

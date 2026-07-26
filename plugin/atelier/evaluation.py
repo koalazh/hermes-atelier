@@ -126,11 +126,18 @@ def evaluate_assertions(
         )
     attempted_targets = {str(event.get("target")) for event in traces}
     for target in case.assertions.calls.forbidden:
+        observed = target in attempted_targets
         results.append(
             {
                 "kind": "calls.forbidden",
                 "value": target,
-                "passed": target not in attempted_targets,
+                "passed": False,
+                "verified": observed,
+                "reason": (
+                    "forbidden target was observed"
+                    if observed
+                    else "absence cannot be verified from optional profile_call traces"
+                ),
             }
         )
     folded = output.casefold()
@@ -354,8 +361,16 @@ class ExperimentService:
         ):
             raise ValueError("runtime definition snapshot does not match its Pack revision")
         model_fingerprint = runtime_attestation.get("model_fingerprint")
+        profile_models = {
+            profile_id: {
+                "model_configuration": profile.get("model_configuration"),
+                "config_sha256": profile.get("config_sha256"),
+            }
+            for profile_id, profile in (runtime_attestation.get("profiles") or {}).items()
+            if isinstance(profile, dict)
+        }
         entry_base_url = str(runtime_attestation.get("entry_base_url") or "")
-        if not isinstance(model_fingerprint, dict) or not entry_base_url:
+        if not isinstance(model_fingerprint, dict) or not profile_models or not entry_base_url:
             raise ValueError("runtime model or entry endpoint attestation is incomplete")
         verified_candidate = (
             _verify_candidate(
@@ -379,6 +394,7 @@ class ExperimentService:
             "source_provenance": runtime_attestation["source_provenance"],
             "definition_snapshot": definition_snapshot,
             "model_fingerprint": redact(model_fingerprint),
+            "profile_models": redact(profile_models),
             "case": case.model_dump(mode="json"),
             "case_path": str(case_path.resolve()),
             "case_hash": case_hash,
@@ -415,7 +431,16 @@ class ExperimentService:
                 if any(
                     final_attestation.get(field) != runtime_attestation.get(field)
                     for field in stable_fields
-                ):
+                ) or {
+                    profile_id: {
+                        "model_configuration": profile.get("model_configuration"),
+                        "config_sha256": profile.get("config_sha256"),
+                    }
+                    for profile_id, profile in (
+                        final_attestation.get("profiles") or {}
+                    ).items()
+                    if isinstance(profile, dict)
+                } != profile_models:
                     raise RuntimeError("runtime definition or model changed during Experiment")
             experiment["status"] = (
                 "completed"

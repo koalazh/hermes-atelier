@@ -144,7 +144,7 @@ Profile 单独配置 Provider、model 和凭据引用。Atelier 不把它们写�
 ## 状态与安全
 
 - `.atelier/v2/designs/`：Design 对话索引、PLAN、handoff 与可选 Draft；
-- `.atelier/v2/traces/`：best-effort 真实 `profile_call` 事件索引；
+- `<HERMES_HOME>/app-packs/<instance>/call-traces/`：已安装实例按 Session 分区的 best-effort `profile_call` 证据；`.atelier/v2/traces/` 仅保留兼容的显式 HTTP Sink 事件；
 - `.atelier/v2/experiments/`：冻结的 Experiment 开发证据；
 - Consumer Profile `.env`：Secret；
 - Consumer Profile `local/app-runtime.json`：无 Secret 的逻辑映射；

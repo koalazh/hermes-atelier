@@ -32,6 +32,24 @@ def runtime_attestation(pack_root: Path, case_path: Path) -> dict[str, Any]:
         "definition_snapshot": snapshot,
         "cases": [{"id": case.id, "hash": case_hash}],
         "model_fingerprint": {"provider": "custom", "model": "test-model"},
+        "profiles": {
+            "dispatcher": {
+                "model_configuration": {
+                    "provider": "custom",
+                    "model": "test-model",
+                    "source": "hermes_native_config",
+                },
+                "config_sha256": "dispatcher-config",
+            },
+            "product": {
+                "model_configuration": {
+                    "provider": "custom",
+                    "model": "test-model",
+                    "source": "hermes_native_config",
+                },
+                "config_sha256": "product-config",
+            },
+        },
         "entry_base_url": "http://entry",
     }
 
@@ -174,6 +192,39 @@ async def test_design_is_multiturn_and_generate_draft_is_explicit(tmp_path: Path
     assert client.calls[-1]["session_id"] == f"atelier_draft_{design['id']}"
 
 
+@pytest.mark.asyncio
+async def test_begin_design_sends_original_requirement_on_the_first_builder_turn(
+    tmp_path: Path,
+) -> None:
+    store = StudioStore(tmp_path / ".atelier" / "v2")
+    client = FakeBuilderClient()
+    service = DesignService(
+        store,
+        builder_base_url="http://builder",
+        builder_api_key="runtime-secret",
+        client_factory=lambda *_: client,
+    )
+
+    design = await service.begin("Build a support application")
+
+    assert design["messages"][0] == {
+        "role": "user",
+        "content": "Build a support application",
+    }
+    assert client.calls[0]["message"] == (
+        "Original requirement:\nBuild a support application"
+    )
+
+
+def test_plan_ready_without_separate_handoff_is_rejected(tmp_path: Path) -> None:
+    store = StudioStore(tmp_path / ".atelier" / "v2")
+    service = DesignService(store, builder_base_url="", builder_api_key="")
+    design = service.create("Build a support application")
+
+    with pytest.raises(ValueError, match="separate PLAN.md"):
+        service._ready_documents(design, "# Plan without handoff")
+
+
 class FakeExperimentClient:
     def __init__(self, store: StudioStore) -> None:
         self.store = store
@@ -242,6 +293,7 @@ human_review: Check simulated-data disclosure.
         "provider": "custom",
         "model": "test-model",
     }
+    assert set(experiment["profile_models"]) == {"dispatcher", "product"}
     assert experiment["definition_snapshot"]["revision"] == experiment["pack_revision"]
     assert len(experiment["trials"]) == 2
     assert all(trial["assertions_passed"] for trial in experiment["trials"])
@@ -249,6 +301,28 @@ human_review: Check simulated-data disclosure.
     assert all("selected new_session state" in call["instructions"] for call in client.calls)
     assert all(call["memory_scope"] is None for call in client.calls)
     assert "runtime-secret" not in str(store.get_experiment(experiment["id"]))
+
+
+@pytest.mark.asyncio
+async def test_experiment_rejects_per_profile_model_change_during_trials(
+    tmp_path: Path,
+) -> None:
+    pack = create_pack(tmp_path / "support")
+    case_path = pack / "cases" / "smoke.yaml"
+    store = StudioStore(tmp_path / ".atelier" / "v2")
+    client = FakeExperimentClient(store)
+    initial = runtime_attestation(pack, case_path)
+    changed = runtime_attestation(pack, case_path)
+    changed["profiles"]["product"]["model_configuration"]["model"] = "other-model"
+
+    with pytest.raises(RuntimeError, match="model changed"):
+        await ExperimentService(store, client_factory=lambda *_: client).run(
+            pack_root=pack,
+            case_path=case_path,
+            api_key="runtime-secret",
+            runtime_attestation=initial,
+            attestation_refresh=lambda: changed,
+        )
 
 
 @pytest.mark.asyncio

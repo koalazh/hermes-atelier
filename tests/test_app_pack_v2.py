@@ -51,22 +51,11 @@ def create_pack(root: Path) -> Path:
     return root
 
 
-def test_app_pack_uses_logical_agents_and_materializes_instance_mapping(tmp_path: Path) -> None:
+def test_app_pack_uses_logical_agents_without_materializing_physical_names(
+    tmp_path: Path,
+) -> None:
     pack = AppPack.load(create_pack(tmp_path / "support"))
-
-    mapping = pack.runtime_mapping(
-        instance="customer-a",
-        agent_base_urls={
-            "dispatcher": "http://127.0.0.1:8080",
-            "product": "http://127.0.0.1:8081",
-        },
-        api_key_env="HERMES_APP_API_KEY",
-        current_agent="dispatcher",
-    )
-
     assert pack.entry == "dispatcher"
-    assert mapping["agents"]["product"]["profile"] == "customer-a--product"
-    assert mapping["agents"]["product"]["base_url"] == "http://127.0.0.1:8081"
     assert "customer-a--product" not in (pack.root / "app.yaml").read_text()
 
 

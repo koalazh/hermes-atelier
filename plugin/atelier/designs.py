@@ -20,57 +20,6 @@ PLAN_TEMPLATE = """# Design Plan
 The Builder has not responded yet.
 """
 
-HANDOFF_FALLBACK = """# Implementation Handoff
-
-## Original requirement
-
-{requirement}
-
-## Aligned goal and design context
-
-{plan}
-
-## Why one or multiple Profiles
-
-Use the Profile boundaries and reasons recorded in `PLAN.md`. A single Profile remains the
-default when no permission, data, workspace, state, failure, reuse, or context boundary requires
-separation.
-
-## Tools, data, and permissions
-
-Use only the tools, data sources, and permission boundaries recorded in `PLAN.md`. Missing real
-systems remain unconnected until the implementer supplies them.
-
-## Session, Memory, and Skill ownership
-
-Preserve the ownership decisions in `PLAN.md`; Hermes owns runtime Session and Memory behavior.
-
-## Recommended collaboration primitive
-
-Use the primitive selected in `PLAN.md`. It is a recommendation, not a fixed implementation
-workflow, and must not be added to the App Pack schema.
-
-## App Pack and HTTP delivery boundary
-
-Deliver a schema-version 2 App Pack that runs through native Hermes and exposes the declared
-OpenAI-compatible entry HTTP endpoint without depending on Atelier or `.atelier`.
-
-## Acceptance Cases
-
-Implement and validate the Cases recorded in `PLAN.md`. Prefer output, evidence, authorization,
-unknown, and honest-degradation assertions over fixed call-tree assertions.
-
-## Real systems not connected
-
-Treat every integration identified as missing in `PLAN.md` as missing; do not fabricate access,
-credentials, production data, or completed integration work.
-
-## Explicit non-goals
-
-Do not turn Atelier into an application runtime, workflow engine, deployment platform, model
-manager, or business router.
-"""
-
 PLANNING_INSTRUCTIONS = """You are the Hermes Atelier Builder in the planning stage.
 Continue the existing native Hermes Session. Investigate and align the goal; ask focused
 questions when missing information materially changes the application. Do not create or edit
@@ -164,12 +113,20 @@ class DesignService:
         )
         return self.detail(design["id"])
 
-    async def message(self, design_id: str, content: str) -> dict[str, Any]:
+    async def begin(self, requirement: str) -> dict[str, Any]:
+        design = self.create(requirement)
+        return await self.message(design["id"], requirement, initial=True)
+
+    async def message(
+        self, design_id: str, content: str, *, initial: bool = False
+    ) -> dict[str, Any]:
         design = self.store.get_design(design_id)
         if design["status"] not in {"conversation", "plan_ready"}:
             raise ValueError("Design is not accepting planning messages")
         task = content
-        if not design["messages"]:
+        if initial and not design["messages"]:
+            task = f"Original requirement:\n{design['requirement']}"
+        elif not design["messages"]:
             task = (
                 f"Original requirement:\n{design['requirement']}\n\nDeveloper message:\n{content}"
             )
@@ -333,10 +290,9 @@ class DesignService:
             if not handoff.strip():
                 raise ValueError("Builder marked PLAN_READY without an implementation handoff")
             return plan.strip(), handoff.strip()
-        plan = output.strip()
-        return plan, HANDOFF_FALLBACK.format(
-            requirement=design["requirement"],
-            plan=plan,
+        raise ValueError(
+            "Builder marked PLAN_READY without separate PLAN.md and "
+            "IMPLEMENTATION_HANDOFF.md documents"
         )
 
     async def _run(

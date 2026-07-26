@@ -22,7 +22,7 @@ human_review: 应拒绝无测量支持的数字，并给出有源码证据的更
 支持的确定性断言只有：
 
 - `calls.required`：必须出现目标的 `profile_call.completed`；
-- `calls.forbidden`：不得出现该目标的任何 Trace 事件；
+- `calls.forbidden`：兼容读取的观察性断言。观察到目标时可确定失败；未观察到时因为 Trace 可选且不覆盖 delegation/MCP/直接 HTTP，只能标记 `unverified`，不能让 Case 通过。普通质量 Case 应改用输出、证据和 human review；
 - `output.must_contain`：输出大小写无关地包含文本；
 - `output.must_not_claim`：输出不得包含文本。
 

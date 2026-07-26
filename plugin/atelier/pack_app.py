@@ -200,7 +200,8 @@ class PackRuntime:
     @staticmethod
     def _agent_key_env(gateway_key_env: str, agent_id: str) -> str:
         suffix = re.sub(r"[^A-Za-z0-9]+", "_", agent_id).strip("_").upper()
-        return f"{gateway_key_env}__{suffix}"
+        digest = hashlib.sha256(agent_id.encode()).hexdigest()[:8].upper()
+        return f"{gateway_key_env}__{suffix}_{digest}"
 
     def _assert_installed_release(
         self,
@@ -428,7 +429,22 @@ class PackRuntime:
                     for target in allowed_targets
                 }
             )
-            _write_env(runtime / ".env", runtime_env, remove={gateway_key_env})
+            old_values = _env_values(runtime / ".env")
+            managed_prefixes = {f"{gateway_key_env}__"}
+            if configured_runtime and configured_runtime.get("gateway_key_env"):
+                managed_prefixes.add(f"{configured_runtime['gateway_key_env']}__")
+            _write_env(
+                runtime / ".env",
+                runtime_env,
+                remove={
+                    gateway_key_env,
+                    *(
+                        key
+                        for key in old_values
+                        if any(key.startswith(prefix) for prefix in managed_prefixes)
+                    ),
+                },
+            )
             mapping = {
                 "schema_version": 1,
                 "pack_id": lock["pack_id"],
@@ -692,9 +708,20 @@ class PackRuntime:
             for target in calls.get("required") or []
         ]
         results.extend(
-            {"kind": "calls.forbidden", "value": target, "passed": target not in attempted}
+            {
+                "kind": "calls.forbidden",
+                "value": target,
+                "passed": False,
+                "verified": target in attempted,
+                "reason": (
+                    "forbidden target was observed"
+                    if target in attempted
+                    else "absence cannot be verified from optional profile_call traces"
+                ),
+            }
             for target in calls.get("forbidden") or []
         )
+
         folded = output.casefold()
         results.extend(
             {
@@ -713,6 +740,11 @@ class PackRuntime:
             for value in output_rules.get("must_not_claim") or []
         )
         return results
+
+    def trace_events(self, *, instance: str, source_session_id: str) -> list[dict[str, Any]]:
+        return self._read_traces(
+            self._case_trace_path(instance, source_session_id), source_session_id
+        )
 
     def _contract_assertion(self, lock: dict[str, Any], output: str) -> dict[str, Any] | None:
         relative = lock["manifest"].get("public_api", {}).get("output_contract")
@@ -812,7 +844,9 @@ class PackRuntime:
             self._run_case(lock, instance=instance, runtime=runtime, case=case) for case in cases
         ]
         result = {
+            "kind": "case_results",
             "instance": instance,
+            "pack_revision": lock["pack_revision"],
             "passed": all(item["passed"] for item in results),
             "cases": results,
         }
@@ -941,6 +975,21 @@ class PackRuntime:
             for logical, target in mapping["agents"].items():
                 if target.get("api_key_env") != agent_key_envs.get(logical):
                     raise RuntimeError(f"runtime credential mapping is invalid: {agent_id}")
+            env_values = _env_values(profile_root / ".env")
+            managed_prefix = f"{runtime['gateway_key_env']}__"
+            expected_key_envs = {
+                str(target["api_key_env"]) for target in mapping["agents"].values()
+            }
+            actual_key_envs = {
+                key for key in env_values if key.startswith(managed_prefix)
+            }
+            if actual_key_envs != expected_key_envs:
+                raise RuntimeError(
+                    f"runtime credential exposure does not match mapping: {agent_id}"
+                )
+            self_key_env = str(mapping["agents"][agent_id]["api_key_env"])
+            if env_values.get("API_SERVER_KEY") != env_values.get(self_key_env):
+                raise RuntimeError(f"runtime self credential is invalid: {agent_id}")
             model_record = profile_models.get(agent_id)
             if not isinstance(model_record, dict):
                 raise RuntimeError(f"configured model record is missing: {agent_id}")
@@ -1041,6 +1090,7 @@ class PackRuntime:
             "instance": instance,
             "pack_id": attestation["pack_id"],
             "pack_version": attestation["pack_version"],
+            "pack_revision": attestation["pack_revision"],
             "profiles": profiles,
             "evidence_levels": self._evidence_levels_with(
                 instance, "live_probed" if all_live else None
@@ -1054,10 +1104,34 @@ class PackRuntime:
     def _write_evidence(self, instance: str, name: str, value: dict[str, Any]) -> None:
         path = self._instance_state(instance) / "evidence" / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(value, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(value, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @staticmethod
+    def _valid_evidence(
+        path: Path,
+        *,
+        instance: str,
+        pack_revision: str,
+        kind: str | None = None,
+        passed: bool = False,
+    ) -> bool:
+        try:
+            value = _load_json(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        if value.get("instance") != instance or value.get("pack_revision") != pack_revision:
+            return False
+        if kind and (value.get("kind") != kind or value.get("verified") is not True):
+            return False
+        return not passed or value.get("passed") is True
 
     def evidence_levels(self, instance: str) -> list[str]:
         state = self._instance_state(instance)
@@ -1070,11 +1144,28 @@ class PackRuntime:
             return levels
         levels.append("configured")
         evidence = state / "evidence"
-        if (evidence / "configured-attestation.json").is_file():
+        lock = _load_json(state / "app.lock")
+        revision = str(lock.get("pack_revision") or "")
+        if self._valid_evidence(
+            evidence / "configured-attestation.json",
+            instance=instance,
+            pack_revision=revision,
+            kind="configured_runtime_attestation",
+        ):
             levels.append("runtime_attested")
-        if (evidence / "live-probe.json").is_file():
+        if self._valid_evidence(
+            evidence / "live-probe.json",
+            instance=instance,
+            pack_revision=revision,
+            kind="live_runtime_probe",
+        ):
             levels.append("live_probed")
-        if (evidence / "cases.json").is_file():
+        if self._valid_evidence(
+            evidence / "cases.json",
+            instance=instance,
+            pack_revision=revision,
+            passed=True,
+        ):
             levels.append("cases_passed")
             install = _load_json(install_path)
             if install.get("fresh_instance") is True:

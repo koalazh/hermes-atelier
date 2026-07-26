@@ -118,10 +118,12 @@ def test_pack_install_and_configure_use_hermes_and_local_runtime_state(
     env = (home / "profiles" / "customer-a--dispatcher" / ".env").read_text()
     assert "MODEL_KEY=model-secret" in env
     assert "GATEWAY_KEY=gateway-secret-value" not in env
-    assert "GATEWAY_KEY__DISPATCHER=gateway-secret-value" in env
+    dispatcher_key_env = mapping["agents"]["dispatcher"]["api_key_env"]
+    product_key_env = mapping["agents"]["product"]["api_key_env"]
+    assert f"{dispatcher_key_env}=gateway-secret-value" in env
     product_env = (home / "profiles" / "customer-a--product" / ".env").read_text()
-    assert "GATEWAY_KEY__DISPATCHER=" not in product_env
-    assert "GATEWAY_KEY__PRODUCT=" in product_env
+    assert f"{dispatcher_key_env}=" not in product_env
+    assert f"{product_key_env}=" in product_env
     assert "API_SERVER_PORT=9123" in env
     assert any("providers.app_pack.api" in call for call in fake.calls)
     assert any("providers.app_pack.key_env" in call for call in fake.calls)
@@ -129,6 +131,9 @@ def test_pack_install_and_configure_use_hermes_and_local_runtime_state(
     assert not any("multiplex_profiles" in call for call in fake.calls)
     assert (home / "app-packs" / "customer-a" / "app.lock").is_file()
 
+    env_path = home / "profiles" / "customer-a--dispatcher" / ".env"
+    with env_path.open("a", encoding="utf-8") as output:
+        output.write("GATEWAY_KEY__REMOVED_TARGET_DEADBEEF=stale-secret\n")
     runtime.configure(
         instance="customer-a",
         model="second-model",
@@ -142,6 +147,7 @@ def test_pack_install_and_configure_use_hermes_and_local_runtime_state(
     )
     assert state["model"] == "second-model"
     assert state["entry_base_url"] == "http://127.0.0.1:9223"
+    assert "GATEWAY_KEY__REMOVED_TARGET_DEADBEEF" not in env_path.read_text()
 
     runtime.gateway("start", instance="customer-a")
     started = [call for call in fake.calls if "gateway" in call and "start" in call]
@@ -529,6 +535,47 @@ def test_configured_attestation_and_live_probe_are_distinct_per_profile_evidence
     )
     assert stored_configured["evidence_levels"].count("runtime_attested") == 1
     assert stored_live["evidence_levels"].count("live_probed") == 1
+
+    (home / "app-packs" / "customer-a" / "evidence" / "live-probe.json").write_text(
+        "not-json", encoding="utf-8"
+    )
+    assert runtime.evidence_levels("customer-a") == [
+        "packed",
+        "installed",
+        "configured",
+        "runtime_attested",
+    ]
+
+
+def test_per_agent_gateway_key_env_names_do_not_collide() -> None:
+    assert PackRuntime._agent_key_env("GATEWAY_KEY", "foo-bar") != (
+        PackRuntime._agent_key_env("GATEWAY_KEY", "foo_bar")
+    )
+
+
+def test_attestation_rejects_unexpected_managed_target_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+    runtime = PackRuntime(pack, hermes_home=home, hermes_runner=FakeHermes(home))
+    runtime.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+    runtime.configure(
+        instance="customer-a",
+        model="test-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+    env_path = home / "profiles" / "customer-a--product" / ".env"
+    with env_path.open("a", encoding="utf-8") as output:
+        output.write("GATEWAY_KEY__UNEXPECTED_DEADBEEF=stale-secret\n")
+
+    with pytest.raises(RuntimeError, match="credential exposure"):
+        runtime.attest(instance="customer-a")
 
 
 def test_configured_attestation_reads_native_per_profile_model_override(

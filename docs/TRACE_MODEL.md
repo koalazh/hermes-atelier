@@ -55,4 +55,4 @@ dispatch 前无法解析映射、按 Tool Policy 允许目标或读取 Secret �
 
 ## 脱敏与保留
 
-Trace 入口和 Studio Store 对 Authorization、常见 Secret assignment 和 Key 形状执行脱敏。`.atelier/v2/traces` 是可删除开发证据，默认不进入 Git 或 App Pack。需要长期审计时应使用 Consumer 自己的受控观测设施，而不是扩大 Atelier 所有权。
+默认 App Pack Mapping 把文件 Trace 写入 `<HERMES_HOME>/app-packs/<instance>/call-traces/`，按 `source_session_id` 的 SHA-256 文件名分区；Dashboard Lens 从选中实例读取同一来源。显式 HTTP Trace 入口及 Studio Store 只作为兼容 Sink，并对 Authorization、常见 Secret assignment 和 Key 形状执行脱敏。两者都是可删除开发证据，默认不进入 Git 或 App Pack。需要长期审计时应使用 Consumer 自己的受控观测设施，而不是扩大 Atelier 所有权。
