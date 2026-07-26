@@ -1,8 +1,3 @@
-model:
-  default: ${ATELIER_MODEL}
-  provider: custom
-  base_url: ${ATELIER_MODEL_BASE_URL}
-
 terminal:
   backend: local
   cwd: ${ATELIER_DRAFT_ROOT}

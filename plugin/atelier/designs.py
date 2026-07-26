@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,54 @@ original requirement, aligned goal, why multiple Profiles are or are not needed,
 boundaries, tools/data/permissions, Session/Memory/Skill ownership, recommended collaboration
 primitive, App Pack and HTTP delivery boundaries, acceptance Cases, unconnected real systems,
 and explicit non-goals. It is an implementation contract, not a fixed workflow.
+
+Ground every implementation handoff in the current frozen App Pack schema:
+- `app.yaml` uses `schema_version: 2`, `id`, `version`, `entry`, `agents`,
+  `allowed_calls`, `collaboration`, `public_api`, `state_policy`,
+  `state_compatibility`, `cases`, and `contracts`;
+- each `agents.<id>.distribution` points to a Hermes Profile Distribution directory containing
+  `distribution.yaml`, `config.yaml`, and `SOUL.md`; do not invent `profile.yaml`;
+- model/provider, ports, Gateway keys, Secrets, production deployment, and workflow steps do not
+  belong in `app.yaml`; Hermes and the consumer own them;
+- the entry Profile is reached through its own Hermes Gateway URL. Do not claim that a request
+  `model` value dynamically routes to an App Pack Profile;
+- `stateless` means the application declares no durable business state. Do not claim Hermes
+  Sessions cease to exist.
+
+When showing a single-Profile layout or manifest, use this exact minimal shape and change only
+the identifiers, descriptions, state policy, endpoints, and Case paths justified by the design:
+```yaml
+schema_version: 2
+id: example-app
+version: 0.1.0
+description: One sentence.
+entry: main
+agents:
+  main:
+    distribution: profiles/main
+    exposure: public
+    description: One responsibility.
+allowed_calls: {}
+collaboration: []
+public_api:
+  protocol: openai
+  endpoints: [/v1/responses, /v1/chat/completions]
+state_policy: stateless
+state_compatibility: preserve
+cases: [cases/smoke.yaml]
+contracts: []
+```
+The matching Distribution lives under `profiles/main/`, never `agents/main/`. `allowed_calls` is
+a mapping and `collaboration` is a list. `public_api` is required. Do not propose optional mock
+tools, data, or integrations unless the aligned requirement explicitly asks for them.
+`state_policy` is exactly one of `stateless`, `session_only`, or `caller_scoped`.
+`state_compatibility` is exactly one of `preserve`, `review_required`, or `reset_recommended`;
+`session_only` is never a state-compatibility value. For the minimal stateless example above,
+keep `state_compatibility: preserve`.
+
+Examples may be conceptual, but must not contradict those contracts. Do not append a fixed
+implementation order. Give constraints, deliverables, and verifiable acceptance evidence so the
+chosen Coding Agent can decide the implementation process.
 """
 
 
@@ -134,6 +183,11 @@ class DesignService:
             instructions=PLANNING_INSTRUCTIONS,
         )
         output = response["message"]["content"]
+        if re.match(r"^\s*HTTP\s+[45]\d\d\b", output, flags=re.IGNORECASE):
+            raise ValueError(
+                "Builder model/provider request failed: "
+                f"{redact_text(output).strip()[:500]}"
+            )
         turn_index = len(design["builder_turns"]) + 1
         messages = [
             *design["messages"],

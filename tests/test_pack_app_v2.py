@@ -510,6 +510,67 @@ def test_configured_attestation_and_live_probe_are_distinct_per_profile_evidence
     assert live["evidence_levels"][-1] == "live_probed"
 
 
+def test_configured_attestation_reads_native_per_profile_model_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack = released_pack(tmp_path)
+    home = tmp_path / "hermes"
+    fake = FakeHermes(home)
+
+    def read_config(*args: str) -> str:
+        profile = args[args.index("-p") + 1]
+        dotted = args[-1].split(".")
+        value = yaml.safe_load(
+            (home / "profiles" / profile / "config.yaml").read_text(encoding="utf-8")
+        )
+        for key in dotted:
+            value = value[key]
+        return str(value)
+
+    runtime = PackRuntime(
+        pack,
+        hermes_home=home,
+        hermes_runner=fake,
+        hermes_reader=read_config,
+    )
+    runtime.install(instance="customer-a")
+    monkeypatch.setenv("MODEL_KEY", "model-secret")
+    monkeypatch.setenv("GATEWAY_KEY", "gateway-secret-value")
+    runtime.configure(
+        instance="customer-a",
+        model="default-model",
+        model_base_url="https://model.invalid/v1",
+        model_key_env="MODEL_KEY",
+        gateway_key_env="GATEWAY_KEY",
+        gateway_port=9123,
+    )
+    fake(
+        "-p",
+        "customer-a--product",
+        "config",
+        "set",
+        "model.default",
+        "specialist-model",
+    )
+
+    configured = runtime.attest(instance="customer-a")
+
+    assert configured["profiles"]["dispatcher"]["model_configuration"] == {
+        "provider": "custom:app_pack",
+        "model": "default-model",
+        "base_url": "https://model.invalid/v1",
+        "source": "wrapper_default",
+    }
+    assert configured["profiles"]["product"]["matches_wrapper_record"] is False
+    assert configured["profiles"]["product"]["model_configuration"] == {
+        "provider": "custom:app_pack",
+        "model": "specialist-model",
+        "base_url": "https://model.invalid/v1",
+        "key_env": "MODEL_KEY",
+        "source": "hermes_native_config",
+    }
+
+
 def test_cases_on_new_physical_profiles_record_fresh_verified_separately(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

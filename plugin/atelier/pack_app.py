@@ -117,6 +117,7 @@ class PackRuntime:
         hermes_home: Path,
         hermes_bin: str = "hermes",
         hermes_runner: Callable[..., None] | None = None,
+        hermes_reader: Callable[..., str] | None = None,
         urlopen: Callable[..., Any] | None = None,
     ) -> None:
         self.pack_root = pack_root.resolve()
@@ -124,6 +125,7 @@ class PackRuntime:
         self.hermes_bin = hermes_bin
         self.lock = _load_json(self.pack_root / "app.lock")
         self.hermes_runner = hermes_runner or self._run_hermes
+        self.hermes_reader = hermes_reader or self._read_hermes
         self.urlopen = urlopen or urllib.request.urlopen
 
     def _run_hermes(self, *args: str) -> None:
@@ -133,6 +135,42 @@ class PackRuntime:
             env={**os.environ, "HERMES_HOME": str(self.hermes_home)},
             check=True,
         )
+
+    def _read_hermes(self, *args: str) -> str:
+        return subprocess.run(
+            [self.hermes_bin, *args],
+            cwd=self.pack_root,
+            env={**os.environ, "HERMES_HOME": str(self.hermes_home)},
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def _current_model_configuration(
+        self,
+        profile: str,
+        recorded: dict[str, Any],
+        *,
+        matches_wrapper_record: bool,
+    ) -> dict[str, Any]:
+        if matches_wrapper_record:
+            return recorded
+        provider = self.hermes_reader("-p", profile, "config", "get", "model.provider")
+        model = self.hermes_reader("-p", profile, "config", "get", "model.default")
+        result = {
+            "provider": provider,
+            "model": model,
+            "base_url": "unverified",
+            "source": "hermes_native_config",
+        }
+        if provider == "custom:app_pack":
+            result["base_url"] = self.hermes_reader(
+                "-p", profile, "config", "get", "providers.app_pack.api"
+            )
+            result["key_env"] = self.hermes_reader(
+                "-p", profile, "config", "get", "providers.app_pack.key_env"
+            )
+        return result
 
     @staticmethod
     def _validate_instance(instance: str) -> str:
@@ -906,15 +944,20 @@ class PackRuntime:
             model_record = profile_models.get(agent_id)
             if not isinstance(model_record, dict):
                 raise RuntimeError(f"configured model record is missing: {agent_id}")
+            config_sha256 = _digest(profile_root / "config.yaml")
+            matches_wrapper_record = (
+                config_sha256 == (runtime.get("profile_config_hashes") or {}).get(agent_id)
+            )
             profiles[agent_id] = {
                 "profile": self._physical(instance, agent_id),
                 "base_url": mapping["agents"][agent_id]["base_url"],
-                "model_configuration": model_record,
-                "config_sha256": _digest(profile_root / "config.yaml"),
-                "matches_wrapper_record": (
-                    _digest(profile_root / "config.yaml")
-                    == (runtime.get("profile_config_hashes") or {}).get(agent_id)
+                "model_configuration": self._current_model_configuration(
+                    self._physical(instance, agent_id),
+                    model_record,
+                    matches_wrapper_record=matches_wrapper_record,
                 ),
+                "config_sha256": config_sha256,
+                "matches_wrapper_record": matches_wrapper_record,
             }
 
         result = {

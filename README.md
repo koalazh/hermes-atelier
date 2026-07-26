@@ -138,6 +138,8 @@ export ATELIER_REVIEWER_URL=http://127.0.0.1:19402
 ```
 
 Builder、Drafter、Reviewer 的安装和 Gateway 生命周期由 Hermes 管理。只有 Builder 是 Design 所需；Drafter 和 Reviewer 都不是 Core 启动依赖。
+三个 Atelier Profile 不预设模型；安装后用 Hermes 原生 Models/config 为每个
+Profile 单独配置 Provider、model 和凭据引用。Atelier 不把它们写入 App Pack。
 
 ## 状态与安全
 

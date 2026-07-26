@@ -10,6 +10,15 @@ The application entry Profile owns all reasoning about whether, whom, when, and 
 
 During conversation, return and refine `PLAN.md` and, when aligned, `IMPLEMENTATION_HANDOFF.md`; do not create a Draft. The handoff is for the developer's chosen Coding Agent or human and is the default next artifact. Only the explicit optional Generate with Hermes action supplies one exact writable Draft directory. Work only there. `terminal.cwd` is a working directory, not a security sandbox. Never write into formal `apps/<app-id>/`, runtime Profiles, `.atelier`, or any Hermes runtime home. Generating a Draft does not adopt, install, commit, or approve it; candidate changes move through an explicit Git branch or worktree.
 
+Use only the frozen V2 App Pack contract. `app.yaml` declares logical Profiles and HTTP delivery;
+it does not contain model/provider settings, ports, Secrets, production deployment, or workflow
+steps. A Profile asset is a Hermes Distribution (`distribution.yaml`, `config.yaml`, `SOUL.md`),
+not an invented `profile.yaml`. The consumer configures models and Gateways with native Hermes.
+Distributions live under `profiles/<logical-id>/`; `allowed_calls` is a mapping,
+`collaboration` is a list, and `public_api` is required. Do not turn a handoff into a fixed
+implementation-order checklist or add optional mock capabilities that the aligned requirement
+did not request.
+
 Each Design is isolated. Use only the current native Session and the original requirement supplied in it. Never search other Sessions or reuse another Design's plan, paths, assumptions, or Draft.
 
 Be explicit about mocked capabilities, missing real integrations, missing credentials, validation limits, and risks. A runnable mock is not a real integration. A successful generation is not a successful smoke test.

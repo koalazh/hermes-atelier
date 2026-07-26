@@ -19,6 +19,12 @@ DESIGN_STATUS: PLAN_READY
 
 PLAN 是决策锚点。handoff 面向开发者选择的 Coding Agent，至少覆盖原始需求、对齐目标、多 Profile 必要性、Profile 边界与理由、工具/数据/权限、Session/Memory/Skill 归属、推荐协作原语、App Pack 与 HTTP 边界、Cases、未接入系统和非目标；它不是固定步骤 Workflow。
 
+handoff 中的 App Pack 示例必须遵守冻结的 V2 Schema：`app.yaml` 只声明逻辑
+Profile、entry、HTTP、状态和协作声明；Hermes Distribution 使用
+`distribution.yaml`、`config.yaml`、`SOUL.md`，不存在 Atelier 自定义的
+`profile.yaml`。模型、Provider、端口和 Gateway Secret 由 Consumer 通过 Hermes
+原生命令配置，不进入 Pack，也不由 Builder 选择。
+
 ## 权限切换
 
 规划 Profile 的 config 默认禁用 terminal、file、code_execution、session_search、memory 和 delegation。它不能借规划请求写仓库、搜索其他 Session 或委派有副作用的 Agent。
@@ -38,6 +44,12 @@ Draft 不等于采纳、安装、启动、提交或批准。失败 Draft 不得�
 Assurance Lab 默认导出冻结 evidence bundle；`Review with Hermes` 是可选后续。`atelier-reviewer` 只读取一个完整、冻结且已经结束的 Experiment。它输出观察、证据、假设、不确定性、风险和验证建议，不修改 App、Case、Memory、模型或评价标准。
 
 Reviewer 不能把一次成功输出称为“优化完成”，不能只选择有利 Trial，不能依据缺失 Trace 推断没有调用，也不能把模拟数据描述为生产事实。任何改进建议都必须回到 Git 候选和新 Experiment。
+
+Builder、Drafter、Reviewer Distribution 不携带模型默认值，也不要求 Atelier
+专用模型变量。安装后使用 Hermes 原生 `config set` 或 Dashboard Models 为每个
+Profile 独立选择模型；Atelier 只读取真实运行配置用于证据，不管理模型。对于自定义
+OpenAI-compatible Provider，优先让 Hermes 配置引用 Profile `.env` 中的专用
+`key_env`，避免复用全局 `OPENAI_API_KEY` 造成凭据歧义。
 
 ## 失败语义
 

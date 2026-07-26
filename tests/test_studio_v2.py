@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from plugin.atelier.app_pack import AppPack, build_definition_snapshot
-from plugin.atelier.designs import DesignService
+from plugin.atelier.designs import PLANNING_INSTRUCTIONS, DesignService
 from plugin.atelier.evaluation import ExperimentService, load_case
 from plugin.atelier.studio_store import StudioStore
 from tests.test_app_pack_v2 import create_pack
@@ -59,6 +59,31 @@ def test_dashboard_api_loads_from_a_standalone_user_plugin(tmp_path: Path) -> No
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_builder_handoff_prompt_uses_frozen_v2_contract_without_fixed_workflow() -> None:
+    assert "`schema_version: 2`" in PLANNING_INSTRUCTIONS
+    assert "`distribution.yaml`, `config.yaml`, and `SOUL.md`" in PLANNING_INSTRUCTIONS
+    assert "do not invent `profile.yaml`" in PLANNING_INSTRUCTIONS
+    assert "model/provider, ports, Gateway keys, Secrets" in PLANNING_INSTRUCTIONS
+    assert "distribution: profiles/main" in PLANNING_INSTRUCTIONS
+    assert "allowed_calls: {}" in PLANNING_INSTRUCTIONS
+    assert "public_api:" in PLANNING_INSTRUCTIONS
+    assert "never `agents/main/`" in PLANNING_INSTRUCTIONS
+    assert "`session_only` is never a state-compatibility value" in PLANNING_INSTRUCTIONS
+    assert "chosen Coding Agent can decide the implementation process" in PLANNING_INSTRUCTIONS
+
+
+def test_atelier_profiles_leave_model_configuration_to_native_hermes() -> None:
+    root = Path(__file__).resolve().parents[1]
+    for name in ("atelier-builder", "atelier-drafter", "atelier-reviewer"):
+        config = (root / "profiles" / name / "config.yaml").read_text(encoding="utf-8")
+        distribution = (root / "profiles" / name / "distribution.yaml").read_text(
+            encoding="utf-8"
+        )
+        assert "\nmodel:" not in f"\n{config}"
+        assert "OPENAI_API_KEY" not in distribution
+        assert "ATELIER_MODEL" not in distribution
 
 
 class FakeBuilderClient:
