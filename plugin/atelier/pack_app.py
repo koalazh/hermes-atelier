@@ -981,10 +981,9 @@ class PackRuntime:
             "fresh_instance": install.get("fresh_instance") is True,
             "trace_directory": str(state / "call-traces"),
             "profiles": profiles,
-            "evidence_levels": [
-                *self.evidence_levels(instance),
-                "runtime_attested",
-            ],
+            "evidence_levels": self._evidence_levels_with(
+                instance, "runtime_attested"
+            ),
         }
         self._write_evidence(instance, "configured-attestation.json", result)
         result["evidence_levels"] = self.evidence_levels(instance)
@@ -1043,10 +1042,9 @@ class PackRuntime:
             "pack_id": attestation["pack_id"],
             "pack_version": attestation["pack_version"],
             "profiles": profiles,
-            "evidence_levels": [
-                *self.evidence_levels(instance),
-                *(["live_probed"] if all_live else []),
-            ],
+            "evidence_levels": self._evidence_levels_with(
+                instance, "live_probed" if all_live else None
+            ),
         }
         if all_live:
             self._write_evidence(instance, "live-probe.json", result)
@@ -1081,6 +1079,12 @@ class PackRuntime:
             install = _load_json(install_path)
             if install.get("fresh_instance") is True:
                 levels.append("fresh_verified")
+        return levels
+
+    def _evidence_levels_with(self, instance: str, level: str | None) -> list[str]:
+        levels = self.evidence_levels(instance)
+        if level and level not in levels:
+            levels.append(level)
         return levels
 
     def _resolve_instance(self, instance: str | None) -> str:

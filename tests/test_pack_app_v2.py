@@ -509,6 +509,27 @@ def test_configured_attestation_and_live_probe_are_distinct_per_profile_evidence
     )
     assert live["evidence_levels"][-1] == "live_probed"
 
+    configured_again = runtime.attest(instance="customer-a")
+    live_again = runtime.live_probe(instance="customer-a", timeout=0.1)
+    assert configured_again["evidence_levels"].count("runtime_attested") == 1
+    assert live_again["evidence_levels"].count("live_probed") == 1
+    stored_configured = json.loads(
+        (
+            home
+                / "app-packs"
+            / "customer-a"
+            / "evidence"
+            / "configured-attestation.json"
+        ).read_text(encoding="utf-8")
+    )
+    stored_live = json.loads(
+        (
+            home / "app-packs" / "customer-a" / "evidence" / "live-probe.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert stored_configured["evidence_levels"].count("runtime_attested") == 1
+    assert stored_live["evidence_levels"].count("live_probed") == 1
+
 
 def test_configured_attestation_reads_native_per_profile_model_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
