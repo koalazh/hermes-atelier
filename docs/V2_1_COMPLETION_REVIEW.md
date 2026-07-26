@@ -64,6 +64,7 @@
 
 - 85 个 pytest 通过，Ruff、Dashboard `node --check`、`uv build`、`git diff --check` 通过。
 - 从修复后干净 HEAD 创建新的 Single Profile release，在全新 HERMES_HOME 完成 install/configure/start、普通 OpenAI-compatible HTTP、configured attestation、live probe 和 1/1 Case；证据阶梯达到 `fresh_verified`。
+- Completion Challenge 首轮指出修复后的实例 Trace 尚缺真实浏览器 oracle。随后从当前 HEAD 重新安装 Mini VOC，创建普通 Hermes Session 和真实完整/未完成 `profile_call` 事件；浏览器自动发现实例和最近 Session，无需复制 ID 即显示 `partial_trace`、started/completed 事件及“其他原生协作可能不可见”提示，console 无 warning/error。
 - 新 `.env` 只有 self 的摘要 Key env；live probe 对无法证明的 Profile identity 继续报告 `unverified`。
 - 所有本任务 Gateway、launchd 条目、Dashboard、临时 runtime/release 和人工 Lens Trace 已停止或删除；用户已有 `.atelier` Design/Experiment 数据未删除。
 

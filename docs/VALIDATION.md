@@ -66,7 +66,7 @@ Dashboard 未启动且 release 目录中没有 `.atelier`、Builder、Drafter �
 - Core 与 Assurance Lab 在导航和操作上分区；
 - 页面 console 无 warning/error。
 
-真实 workspace API 还确认四个 Pack 会自动发现实例和最近 Sessions。初轮验收曾向 Studio Store 人工写入一条事件来检查 `partial_trace` 文案；独立完成检视指出这不能证明 Lens 接通 App Pack 的实例 Trace，因此不计作最终运行证据。修复后 Session API 携带自动发现的 instance，并由回归测试从该实例真实哈希 Trace 文件读到 `partial_trace`；文案继续明确原生 delegation、Kanban 或 MCP 协作可能不可见。恢复浏览器时 Chromium 落入 `ERR_CONNECTION_REFUSED` 数据页，浏览器控制策略禁止以脚本 URL 或其他浏览器表面绕过，因此本轮没有伪造“再次点击 Sessions 页”的可见证据；浏览器已确认的可见范围与修复后 API/确定性验证范围在这里分别记录。
+真实 workspace API 还确认四个 Pack 会自动发现实例和最近 Sessions。初轮验收曾向 Studio Store 人工写入一条事件来检查 `partial_trace` 文案；独立完成检视指出这不能证明 Lens 接通 App Pack 的实例 Trace，因此不计作最终运行证据。修复后重新从当前 HEAD 安装 Mini VOC 为 `browser-voc`，创建普通 Hermes Session `browser-session-v21`，通过入口 HTTP 产生一组完整 `profile_call`，再以同一 source Session 产生一条 timeout 后已请求停止、但没有完成事件的真实调用。浏览器选择 `mini-voc` 后自动发现该实例，Sessions & Evidence 无需复制 ID 即自动选中 `V2.1 partial trace proof / browser-session-v21`；Lens 从实例哈希 Trace 文件显示 `partial_trace`、两个 started 和一个 completed 事件，并明确原生 delegation、Kanban、MCP 或其他协作仍可能不可见。浏览器 console 无 warning/error。这次可见复验取代了此前仅有 API/确定性证据的限制。
 
 ## 对抗式检视后的定向复验
 
